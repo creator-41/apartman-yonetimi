@@ -1,3 +1,8 @@
+import { createApi } from './transport.js';
+import { config } from './config.js';
+let storage;
+try { storage=window.sessionStorage; } catch { /* memory-only session */ }
+const api=createApi({...config,storage});
 'use strict';
 let state,tab='overview',selectedMonth=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit'}).format(new Date()),dialogAction;
 const $=s=>document.querySelector(s);
@@ -8,10 +13,6 @@ const monthName=v=>new Date(v+'-15T12:00:00').toLocaleDateString('tr-TR',{year:'
 const dateName=v=>new Date(v.slice(0,10)+'T12:00:00').toLocaleDateString('tr-TR');
 const unitName=id=>state.units.find(u=>u.id===id)?.label||'Bölüm';
 const noticeHTML=n=>'<article class="notice"><h3>'+esc(n.title)+'</h3><p>'+esc(n.body)+'</p><small>'+dateName(n.created_at)+'</small>'+(state.admin?' <button class="small danger" data-action="delete-notice" data-id="'+n.id+'">Kaldır</button>':'')+'</article>';
-async function api(path,method='GET',data){
- const res=await fetch('/api/'+path,{method,credentials:'same-origin',headers:method==='GET'?{}:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});
- const result=await res.json();if(!res.ok)throw new Error(result.error||'Bağlantı hatası.');return result;
-}
 async function refresh(){
  state=await api('state');$('#building').textContent=state.settings.name;document.title=state.settings.name+' · Komşu';
  $('#mode').textContent=state.admin?'Yönetici paneli':'Ortak takip ekranı';$('#auth').textContent=state.admin?'Çıkış yap':'Yönetici girişi';
@@ -48,7 +49,7 @@ function render(){
  }else if(tab==='units'&&state.admin){
   view.innerHTML='<div class="note">“Aidattan muaf tut” açık olan bölümlere yeni aylık aidat yazılmaz. Önceki borçlar ve ödemeler korunur.</div><div class="unit-grid">'+state.units.map(u=>'<article class="unit-card"><div class="unit-top"><h3>'+esc(u.label)+'</h3>'+(u.exempt?'<span class="badge">Aidattan muaf</span>':'')+'</div><p>Malik: '+esc(u.owner||'Belirtilmedi')+'<br>Oturan: '+esc(u.resident||'Belirtilmedi')+'</p><p>Toplam alacak: <strong>'+money(state.charges.filter(c=>c.unit_id===u.id).reduce((s,c)=>s+c.amount-c.paid,0))+'</strong></p><button class="outline small" data-action="unit" data-id="'+u.id+'">Düzenle / Muafiyet</button></article>').join('')+'</div>';
  }else if(tab==='settings'&&state.admin){
-  view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><a class="outline" href="/api/backup" download>JSON yedeği indir</a><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek dosyası malik/oturan bilgilerini de içerir; güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
+  view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><button class="outline" data-action="backup">JSON yedeği indir</button><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek dosyası malik/oturan bilgilerini de içerir; güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
  }
 }
 const input=(name,label,type='text',value='',extra='')=>'<label for="f-'+name+'">'+label+'</label><input id="f-'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'>';
@@ -62,7 +63,7 @@ $('#dialogForm').addEventListener('submit',async e=>{
 $('#closeModal').addEventListener('click',()=>$('#modal').close());
 $('#auth').addEventListener('click',async()=>{
  if(state?.admin){try{await api('logout','POST',{});await refresh();toast('Yönetici oturumu kapatıldı.');}catch(e){error(e);}return;}
- openDialog('Yönetici girişi',input('password','Yönetici şifresi','password','','required autocomplete="current-password" maxlength="1024"'),async f=>{await api('login','POST',{password:f.get('password')});toast('Yönetici paneli açıldı.');},'Giriş yap');
+ openDialog('Yönetici girişi',input('email','Yönetici e-postası','email','','required autocomplete="username"')+input('password','Yönetici şifresi','password','','required autocomplete="current-password" maxlength="1024"'),async f=>{await api('login','POST',{email:f.get('email'),password:f.get('password')});toast('Yönetici paneli açıldı.');},'Giriş yap');
 });
 document.addEventListener('change',e=>{if(e.target.id==='monthFilter'&&e.target.value){selectedMonth=e.target.value;render();}});
 document.addEventListener('submit',async e=>{
@@ -76,6 +77,13 @@ document.addEventListener('click',async e=>{
  try{
  if(action==='show-notices'){tab='notices';render();}
  else if(action==='print')window.print();
+ else if(action==='backup'){
+  btn.disabled=true;
+  const result=await api('backup');
+  const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download='apartman-yedek-'+today()+'.json';a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);btn.disabled=false;
+ }
  else if(action==='charge'){
  const eligible=state.units.filter(u=>!u.exempt),missing=eligible.filter(u=>!state.charges.some(c=>c.unit_id===u.id&&c.period===selectedMonth));
  openDialog('Aylık aidat oluştur',input('period','Aidat ayı','month',selectedMonth,'required min="2000-01" max="2099-12"')+input('amount','Her bölüm için tutar (TL)','number',Number(state.settings.monthlyDues)/100,'required min="0.01" max="10000000" step="0.01"')+'<p class="help">Seçili ayda '+missing.length+' bölümün kaydı eksik. Muaf bölümler atlanır. Daha önce oluşturulan kayıtlar korunur; ikinci kez borç yazılmaz.</p>',async f=>{const m=f.get('period');const r=await api('charges','POST',{period:m,amount:Number(f.get('amount'))});selectedMonth=m;toast(r.count+' bölüme aidat oluşturuldu.');},'Aidatları oluştur');
@@ -103,3 +111,4 @@ document.addEventListener('click',async e=>{
 });
 refresh().catch(error);
 setInterval(()=>{if(!$('#modal').open&&!document.hidden&&!$('#settingsForm'))refresh().catch(error);},60000);
+

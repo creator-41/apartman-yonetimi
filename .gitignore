@@ -1,5 +1,4 @@
 node_modules/
-data/
 .env
-*.sqlite*
-coverage/
+.env.*
+.DS_Store

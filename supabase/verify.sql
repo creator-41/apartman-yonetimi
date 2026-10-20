@@ -1,0 +1,60 @@
+-- Run in SQL Editor. All test data is rolled back; identity sequence gaps are normal.
+begin;
+select set_config('test.apartman_admin',(select user_id::text from public.apartman_admins order by created_at limit 1),true);
+select set_config('test.club_other',coalesce((select user_id::text from public.acisu_admins where user_id not in(select user_id from public.apartman_admins) limit 1),'00000000-0000-0000-0000-000000000001'),true);
+set local role authenticated;
+select set_config('request.jwt.claim.sub',current_setting('test.apartman_admin'),true);
+do $test$
+declare s jsonb; base jsonb; r jsonb; cid int; pid int; eid int; n int; failed boolean;
+begin
+ base:=public.apartman_state();
+ if not (base->>'admin')::boolean then raise exception 'Owner is not authorized'; end if;
+ if exists(select 1 from jsonb_array_elements(base->'charges') v where v->>'period'='2099-10') then raise exception '2099-10 already contains records; select another test period'; end if;
+ perform public.apartman_action('unit','{"id":1,"label":"TEST_UNIT","owner":"TEST_PRIVATE_OWNER","resident":"TEST_PRIVATE_RESIDENT","exempt":true}');
+ select count(*) into n from jsonb_array_elements(public.apartman_state()->'units') v where not (v->>'exempt')::boolean;
+ r:=public.apartman_action('charges','{"period":"2099-10","amount":500}');
+ if (r->>'count')::int<>n then raise exception 'Exemption calculation failed'; end if;
+ r:=public.apartman_action('charges','{"period":"2099-10","amount":999}');
+ if (r->>'count')::int<>0 then raise exception 'Duplicate charges allowed'; end if;
+ s:=public.apartman_state();
+ if (s#>>'{totals,receivable}')::bigint<>(base#>>'{totals,receivable}')::bigint+n*50000 then raise exception 'Receivable incorrect'; end if;
+ select (v->>'id')::int into cid from jsonb_array_elements(s->'charges') v where v->>'period'='2099-10' limit 1;
+ if cid is null then raise exception 'No eligible test unit; test needs at least one nonexempt unit'; end if;
+ failed:=false;
+ begin perform public.apartman_action('payment',jsonb_build_object('chargeId',cid,'amount',501,'date','2099-10-20')); exception when others then failed:=true; end;
+ if not failed then raise exception 'Overpayment allowed'; end if;
+ perform public.apartman_action('payment',jsonb_build_object('chargeId',cid,'amount',200,'date','2099-10-20'));
+ s:=public.apartman_state();
+ if (s#>>'{totals,cash}')::bigint<>(base#>>'{totals,cash}')::bigint+20000 then raise exception 'Payment cash incorrect'; end if;
+ select (v->>'id')::int into pid from jsonb_array_elements(s->'payments') v where (v->>'charge_id')::int=cid limit 1;
+ r:=public.apartman_action('expense','{"category":"Yönetim gideri","description":"TEST_ROLLBACK","amount":120,"date":"2099-10-20"}');
+ eid:=(r->>'count')::int;
+ if (public.apartman_state()#>>'{totals,cash}')::bigint<>(base#>>'{totals,cash}')::bigint+8000 then raise exception 'Expense cash incorrect'; end if;
+ perform public.apartman_action('delete-expense',jsonb_build_object('id',eid));
+ perform public.apartman_action('delete-payment',jsonb_build_object('id',pid));
+ if (public.apartman_state()#>>'{totals,cash}')::bigint<>(base#>>'{totals,cash}')::bigint then raise exception 'Cancellation incorrect'; end if;
+ perform set_config('request.jwt.claim.sub',current_setting('test.club_other'),true);
+ if (public.apartman_state()->>'admin')::boolean then raise exception 'Club admin gained apartment permission'; end if;
+ failed:=false;
+ begin perform public.apartman_action('backup','{}'); exception when insufficient_privilege then failed:=true; end;
+ if not failed then raise exception 'Club admin can export apartment records'; end if;
+ s:=public.apartman_state();
+ if s::text like '%TEST_PRIVATE%' or s ? 'audit' or s ? 'payments' then raise exception 'Private data leaked'; end if;
+end;
+$test$;
+set local role anon;
+select set_config('request.jwt.claim.sub','',true);
+do $test$
+declare failed boolean:=false; s jsonb;
+begin
+ s:=public.apartman_state();
+ if (s->>'admin')::boolean or s::text like '%TEST_PRIVATE%' then raise exception 'Anonymous data leakage'; end if;
+ begin perform public.apartman_action('backup','{}'); exception when insufficient_privilege then failed:=true; end;
+ if not failed then raise exception 'Anonymous action allowed'; end if;
+ failed:=false;
+ begin perform 1 from public.apartman_units; exception when insufficient_privilege then failed:=true; end;
+ if not failed then raise exception 'Direct table read allowed'; end if;
+end;
+$test$;
+rollback;
+select 'PASS: database finance and access checks; test changes rolled back' as test_result;

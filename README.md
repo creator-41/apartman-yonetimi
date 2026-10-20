@@ -1,81 +1,63 @@
 # Komşu · Apartman Yönetimi
 
-8 daire ve 1 dükkân için mobil uyumlu apartman yönetimi. Bölüm adları yönetim ekranından değiştirilebilir. Node.js 24 ve SQLite kullanır; harici paket veya ücretli veritabanı gerektirmez.
+GitHub Pages üzerinde çalışan, Acısu United'ın mevcut Supabase projesine bağlı apartman yönetimi uygulaması. Ayrıca sunucu, SQLite veya yeni Supabase projesi gerektirmez.
 
-## Özellikler
+## Kullanım
 
-- Yönetici şifresiyle giriş; herkese açık ortak takip ekranı.
-- Tek tutarla seçili ayın tüm muaf olmayan bölümlerine aidat oluşturma.
-- Aynı bölüm ve ay için ikinci kez borç oluşturulmasının veritabanında engellenmesi.
-- Bölüm bazında **Aidattan muaf tut**: yeni borçlandırmada uygulanır; eski borç ve ödemeler korunur. Yönetici dairesini Bölümler ekranından muaf yapın.
-- Tam/kısmi ödeme onayı ve onaylı ödemeyi onay sorusuyla iptal etme.
-- Temizlik, elektrik, su, asansör, bakım/onarım, **yönetim gideri** ve diğer giderler.
-- Kasa = açılış bakiyesi + onaylı ödemeler − giderler.
-- **Toplam alacak** = tüm dönemlerdeki aidatlar − ödemeler.
-- Duyurular, aylık CSV, JSON veri yedeği ve son 100 işlemin geçmişi.
-- Ortak ekranda bölüm bazında aidat durumu; malik/oturan adları, ödeme notları ve işlem geçmişi yalnızca yöneticiye gösterilir.
-- Finansal kayıtlar kuruş cinsinden tamsayı tutulur; tarayıcı hafızasında saklanmaz.
+- Ortak takip ekranında aidatlar, giderler, kasa ve duyurular görüntülenir.
+- Yönetici girişi Supabase Auth e-posta/şifre ile yapılır. Kayıt olma akışı yoktur.
+- Apartman yetkisi `apartman_admins` tablosundan kontrol edilir. Acısu yöneticisi olmak tek başına apartman yetkisi vermez.
+- İlk kurulumda 8 daire + 1 dükkân tanımlıdır; bölüm adları düzenlenebilir.
+- Aylık aidat tek işlemle muaf olmayan bölümlere oluşturulur. Aynı bölüm ve ay ikinci kez borçlandırılmaz.
+- Bölümler → Düzenle / Muafiyet → **Aidattan muaf tut** yalnızca yeni borçlandırmalara uygulanır; eski borç ve ödemeler korunur.
+- Tam/kısmi ödeme onayı, ödeme iptali, yönetim gideri dahil ortak giderler, duyurular, CSV ve JSON yedeği vardır.
+- Genel bakış üst kartları tüm dönemleri; aylık aidat/gider tabloları seçili ayı kapsar.
+- Açılış kasa bakiyesi negatif olamaz. Aidat değişikliği geçmiş tahakkukları yeniden hesaplamaz.
 
-## Çalıştırma
+## Veriler ve yetkiler
 
-Node.js **24 veya üstü** kurulu olmalı.
+Tablolar: `apartman_admins`, `apartman_units`, `apartman_charges`, `apartman_payments`, `apartman_expenses`, `apartman_notices`, `apartman_settings`, `apartman_audit`.
 
-macOS / Linux:
+Bu tabloların tamamında RLS açıktır; `anon` ve `authenticated` için doğrudan tablo/sequence erişimi kapalıdır. Bu nedenle güvenlik danışmanındaki **RLS Enabled No Policy** bilgi notları bu tasarımda bilinçlidir; herkese açık tablo politikası eklemeyin.
+
+API yalnızca iki SECURITY INVOKER fonksiyonundan geçer:
+
+- `apartman_state()` ortak özeti; yetkili yönetici için ayrıca özel alanları döndürür.
+- `apartman_action(action,payload)` yalnızca apartman yöneticilerine işlem yaptırır.
+
+Ayrıcalıklı uygulama kodu Data API'ye açılmayan `apartman_private` şemasındadır. Yönetim işlemlerinde üyelik `auth.uid()` üzerinden kontrol edilir. Ortak ekranda malik/oturan isimleri, ödeme notları ve işlem geçmişi yoktur. Ortak ekran bağlantıyı bilen herkese açık olduğundan bölüm etiketleri ve ödeme durumları görülebilir.
+
+Tutarlar kuruş cinsinden tamsayıdır. Ödeme kontrolleri ve aylık borçlandırmalar bir veritabanı işlemi içinde kilitlemeyle yapılır; eşzamanlı istekler fazla ödeme veya çift aidat oluşturamaz. Oturum aynı sekmenin `sessionStorage` alanında apartmana özgü anahtarla tutulur; şifre kaydedilmez. Çıkış Supabase'in yalnızca mevcut oturumunu kapatır.
+
+`public/config.js` yalnızca herkese açık publishable key içerir; `service_role` anahtarı asla istemciye eklenmez. Acısu'nun tabloları, politikaları, kullanıcıları veya Auth ayarları bu kurulumda değiştirilmez. Projenin Auth ve kullanım limitleri ortak kalır.
+
+## Yayın
+
+GitHub Settings → Pages → Source: **GitHub Actions**. `.github/workflows/check.yml` kontroller geçtikten sonra yalnızca `public/` dizinini Pages'e gönderir. Kaynak kodundaki dosya yolları alt dizin yayınına uygundur. Özel alan adı gerekmez.
+
+Yerel önizleme:
 
 ```sh
-export ADMIN_PASSWORD='buraya-en-az-12-karakterlik-ozel-sifre'
 npm start
 ```
 
-Windows PowerShell:
+Python 3 ile http://localhost:3000 açılır. Üretim yayını herhangi bir Python/Node sunucusu çalıştırmaz.
 
-```powershell
-$env:ADMIN_PASSWORD = 'buraya-en-az-12-karakterlik-ozel-sifre'
-npm start
-```
+## Veritabanı kurulumu ve doğrulama
 
-Tarayıcıda http://localhost:3000 açın. Yönetici girişi için belirlediğiniz şifreyi kullanın.
-Örnek şifreyi canlı ortamda kullanmayın. `.env.example` bir ayar rehberidir; uygulama `.env` dosyasını kendiliğinden okumaz. Ortam değişkenlerini sunucudan verin veya Node'un `--env-file` seçeneğini kullanın.
+`supabase/schema.sql` ilk kuruluma ait eklemeli şemadır; kurulu projede tekrar çalıştırmayın. Kurulum Supabase migration geçmişine kaydedilmiştir. Fonksiyon değişikliklerini yeni bir migration olarak uygulayın.
 
-## İlk kullanım
-
-1. Yönetici girişi yapın.
-2. Yönetim ekranında apartman adını, güncel aidatı ve varsa sistem öncesinden devreden kasa bakiyesini kaydedin.
-3. Bölümler ekranında adları kontrol edin; yönetici dairesinde “Aidattan muaf tut” seçeneğini açın.
-4. Aidatlar ekranından ayı seçip “Aylık aidat oluştur” deyin.
-5. Gelen ödemeleri “Ödeme onayla” ile kaydedin; kısmi ödeme de kabul edilir.
-6. Giderleri gerçek ödeme tarihleriyle ekleyin. Düzenli JSON yedeği indirin.
-
-Bir ayın aidat tutarını sonradan değiştirmek mevcut tahakkukları değiştirmez. Muafiyeti açmak geçmiş tahakkukları silmez. Aidatlar ay esasına, giderler gider tarihine göre filtrelenir. Genel bakışın üstündeki dört toplam tüm dönemleri kapsar. Açılış bakiyesi negatif olamaz.
-
-## Yayınlama
-
-**GitHub Pages bu uygulamanın sunucu ve ortak SQLite veritabanını çalıştırmaz.** Node.js veya Docker çalıştırabilen bir sunucu gerekir. Repo oluşturulması canlı yayın anlamına gelmez.
-
-- `ADMIN_PASSWORD`: en az 12 karakter, yalnızca sunucunun gizli ortam ayarına yazın.
-- `DB_PATH`: kalıcı disk üzerindeki SQLite dosyasının yolu. Varsayılan `data/apartman.sqlite`.
-- `PORT`: varsayılan 3000; barındırma hizmetinin verdiği değer de kullanılır.
-- `NODE_ENV=production`: canlı ortamda zorunlu. Oturum çerezi Secure olarak gönderilir; dışarıdan HTTPS kullanın.
-- `APP_ORIGIN`: tam HTTPS alan adı; örn. `https://apartman.example.com`, sonunda / olmadan. Ters proxy kullanıyorsanız bunu mutlaka ayarlayın.
-- Tek sunucu örneği kullanın. SQLite için kalıcı disk/volume bağlayın; geçici sunucu diski kayıtları kaybettirir.
-- `Dockerfile` hazırdır. `/app/data` dizinine yazılabilir kalıcı disk bağlanmalıdır.
-- Oturum süresi 8 saat; giriş denemeleri doğrudan bağlantı adresine göre sınırlanır. Ters proxy tüm ziyaretçileri aynı adresten gösterebilir.
-- Bu sürümde tek yönetici şifresi vardır; kendiliğinden kayıt olma veya şifre sıfırlama e-postası yoktur.
-- Ortak ekran bağlantıyı bilen herkese açıktır; daire adları ve ödeme durumları görülebilir. İsimler yalnızca yöneticiye gösterilir.
-
-## Yedekleme
-
-Yönetim ekranındaki JSON yedeği oturum/şifre içermez; malik ve oturan bilgilerini içerir. Özel bir yerde saklayın. Otomatik JSON geri yükleme bu sürümde yoktur; yedeğin tabloları bakım sırasında SQLite'a aktarılabilir.
-
-Sunucu kapalıyken SQLite dosyasının kopyası tam yedek olarak saklanabilir. Çalışan sunucunun dosyasını normal dosya kopyalama ile yedeklemeyin; WAL dosyasında henüz ana dosyaya yazılmamış işlemler olabilir. Canlı tam yedek için SQLite backup API/komutunu kullanın.
-
-## Kontroller
+`supabase/verify.sql` bütün finansal test işlemlerini **ROLLBACK** ile geri alır. Test için Auth hesabı açmaz ve gerçek finansal kayıt bırakmaz. Kimlikler mevcut `apartman_admins` ve `acisu_admins` tablolarından seçilir.
 
 ```sh
 npm run check
 npm test
 ```
 
-GitHub Actions her push ve pull request'te Node.js 24 üzerinde sözdizimi ve gerçek HTTP/SQLite entegrasyon testini çalıştırır. Testler erişim kontrolü, isimlerin ortak ekrana sızmaması, muafiyet, yinelenen tahakkuk, kısmi ödeme, fazla ödeme engeli, hatalı tarih, ödeme iptali, yönetim gideri, kasa hesabı ve oturum kapatmayı kontrol eder.
+JavaScript testleri oturum yenileme, ayrı yönetici kontrolü, RPC eşlemesi ve hata yönetimini kontrol eder. Canlı veritabanındaki doğrulama; muafiyet, mükerrer aidat, fazla/kısmi ödeme, gider, kasa, ödeme iptali, anonim erişim ve diğer Acısu yöneticisinin yetkisizliğini kapsar.
 
-Önceki Sites uygulamasındaki gerçek kayıtlar bu repoya taşınmamıştır. Veritabanı ilk çalıştırmada boş finansal kayıtlarla başlar.
+## Yedek ve önceki sürüm
+
+Yönetim → JSON yedeği indir ile kayıtlar dışa aktarılabilir. Dosya malik/oturan isimlerini içerir; güvenli yerde saklayın. Otomatik yedekleme ve JSON içe aktarma bu sürümde yoktur. Supabase ücretsiz plandaysa hareketsizlikte duraklatma ve proje genelindeki ücretsiz limitler uygulanır.
+
+Önceki Sites uygulamasının gerçek kayıtları otomatik taşınmamıştır. SQLite sunucusu Git geçmişinde korunur; güncel sürüm Supabase kullanır.
