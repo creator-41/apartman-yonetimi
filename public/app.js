@@ -1,8 +1,11 @@
+import { unpaidCharges, chargeRequest } from './charge-management.js';
 import { createApi } from './transport.js';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
 const api=createApi({...config,storage});
+const selectedCharges=new Set();
+let chargeDialogContext=null;
 'use strict';
 let state,tab='overview',selectedMonth=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit'}).format(new Date()),dialogAction;
 const $=s=>document.querySelector(s);
@@ -36,12 +39,14 @@ function render(){
   const categories=state.categories.map(category=>({category,total:expenses.filter(e=>e.category===category).reduce((s,e)=>s+e.amount,0)})).filter(c=>c.total);
   view.innerHTML=cards()+'<div class="columns"><section class="panel"><div class="toolbar"><h2>Aylık aidat durumu</h2>'+monthFilter()+'</div><p class="muted">'+esc(monthName(selectedMonth))+' · '+paidCount+' / '+charges.length+' bölüm ödedi</p><progress max="'+(expected||1)+'" value="'+paid+'" aria-label="Aidat tahsilat oranı"></progress><div class="bar-row"><span>Tahsil edilen</span><strong>'+money(paid)+'</strong></div><div class="bar-row"><span>Beklenen</span><strong>'+money(expected)+'</strong></div><div class="bar-row"><span>Kalan alacak</span><strong>'+money(expected-paid)+'</strong></div><p class="help">Muafiyet, yalnızca yeni borç oluşturulurken uygulanır.</p>'+(!charges.length?'<p class="empty">Bu ay için aidat oluşturulmamış.</p>':'')+'<h3 class="section-title">Bu ayın gider dağılımı</h3>'+ (categories.map(c=>'<div class="bar-row"><span>'+esc(c.category)+'</span><strong>'+money(c.total)+'</strong></div>').join('')||'<p class="muted">Bu ay gider kaydı yok.</p>')+'</section><section class="panel"><div class="toolbar"><h2>Apartmandan haberler</h2><button class="small outline" data-action="show-notices">Tümü</button></div>'+ (state.notices.slice(0,3).map(noticeHTML).join('')||'<div class="empty">Henüz duyuru yok.</div>')+'</section></div>';
  }else if(tab==='dues'){
+  const eligible=unpaidCharges(charges);
+  for(const id of selectedCharges)if(!eligible.some(c=>c.id===id))selectedCharges.delete(id);
   const rows=state.units.map(u=>{
     const c=charges.find(c=>c.unit_id===u.id),remaining=c?c.amount-c.paid:0;
     const badge=!c?(u.exempt?'Muaf':'Oluşturulmadı'):remaining===0?'Ödendi':c.paid?'Kısmi ödeme':'Bekliyor';
-    return '<tr><td><strong>'+esc(u.label)+'</strong></td><td>'+ (c?money(c.amount):'—')+'</td><td>'+ (c?money(c.paid):'—')+'</td><td>'+ (c?money(remaining):'—')+'</td><td><span class="badge '+(c&&remaining?(c.paid?'partial':'due'):'')+'">'+badge+'</span></td>'+(state.admin?'<td>'+(c&&remaining>0?'<button class="primary small" data-action="pay" data-id="'+c.id+'">Ödeme onayla</button>':'')+'</td>':'')+'</tr>';
+    return '<tr>'+(state.admin?'<td><input type="checkbox" data-charge-select="'+(c?.id||'')+'" aria-label="'+esc(u.label)+' aidatını seç" '+(!c||c.paid>0?'disabled':'')+(c&&selectedCharges.has(c.id)?' checked':'')+'></td>':'')+'<td><strong>'+esc(u.label)+'</strong></td><td>'+ (c?money(c.amount):'—')+'</td><td>'+ (c?money(c.paid):'—')+'</td><td>'+ (c?money(remaining):'—')+'</td><td><span class="badge '+(c&&remaining?(c.paid?'partial':'due'):'')+'">'+badge+'</span></td>'+(state.admin?'<td>'+(c&&remaining>0?'<button class="primary small" data-action="pay" data-id="'+c.id+'">Ödeme onayla</button>':'')+(c?'<button class="outline small" data-action="edit-charge" data-id="'+c.id+'" '+(c.paid>0?'disabled':'')+'>Düzenle</button> <button class="danger small" data-action="remove-charge" data-id="'+c.id+'" '+(c.paid>0?'disabled':'')+'>Sil</button>':'')+'</td>':'')+'</tr>';
   });
-  view.innerHTML='<section class="panel"><div class="toolbar"><h2>Aidat takibi</h2><div class="actions">'+monthFilter()+(state.admin?'<button class="primary" data-action="charge">Aylık aidat oluştur</button>':'')+'<button class="outline" data-action="csv">CSV indir</button></div></div><p class="help">Tablo seçili ayı gösterir. Genel bakıştaki toplam alacak tüm dönemleri kapsar.</p>'+table(['Bölüm','Aidat','Ödenen','Kalan','Durum',...(state.admin?['İşlem']:[])],rows)+'</section>'+(state.admin?'<section class="panel history"><h2>Bu aya ait ödeme kayıtları</h2>'+table(['Bölüm','Ödeme tarihi','Tutar','Not','İşlem'],state.payments.filter(p=>charges.some(c=>c.id===p.charge_id)).map(p=>'<tr><td>'+esc(unitName(charges.find(c=>c.id===p.charge_id).unit_id))+'</td><td>'+dateName(p.date)+'</td><td>'+money(p.amount)+'</td><td class="expense-name">'+esc(p.note)+'</td><td><button class="small danger" data-action="delete-payment" data-id="'+p.id+'">Ödemeyi iptal et</button></td></tr>'))+'</section>':'');
+  view.innerHTML='<section class="panel"><div class="toolbar"><h2>Aidat takibi</h2><div class="actions">'+monthFilter()+(state.admin?'<button class="primary" data-action="charge">Aylık aidat oluştur</button><button class="outline" data-action="edit-selected-charges" disabled>Toplu düzenle</button><button class="danger" data-action="remove-selected-charges" disabled>Toplu sil</button>':'')+'<button class="outline" data-action="csv">CSV indir</button></div></div><p class="help">Tablo seçili ayı gösterir. Genel bakıştaki toplam alacak tüm dönemleri kapsar.</p>'+(state.admin?'<p class="help" id="selectionSummary"></p><p class="help">Ödeme girilmiş aidatlar korunur. Yanlış bir ödeme onayı varsa aşağıdaki ödeme kayıtlarından önce iptal edin; sonra aidatı düzenleyebilir veya silebilirsiniz.</p>':'')+table([...(state.admin?['<input type="checkbox" id="selectAllCharges" aria-label="Ödeme girilmemiş tüm aidatları seç">']:[]),'Bölüm','Aidat','Ödenen','Kalan','Durum',...(state.admin?['İşlem']:[])],rows)+'</section>'+(state.admin?'<section class="panel history"><h2>Bu aya ait ödeme kayıtları</h2>'+table(['Bölüm','Ödeme tarihi','Tutar','Not','İşlem'],state.payments.filter(p=>charges.some(c=>c.id===p.charge_id)).map(p=>'<tr><td>'+esc(unitName(charges.find(c=>c.id===p.charge_id).unit_id))+'</td><td>'+dateName(p.date)+'</td><td>'+money(p.amount)+'</td><td class="expense-name">'+esc(p.note)+'</td><td><button class="small danger" data-action="delete-payment" data-id="'+p.id+'">Ödemeyi iptal et</button></td></tr>'))+'</section>':'');
  }else if(tab==='expenses'){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Ortak giderler</h2><div class="actions">'+monthFilter()+(state.admin?'<button class="primary" data-action="expense">Gider ekle</button>':'')+'</div></div><p class="muted">'+esc(monthName(selectedMonth))+' toplamı: <strong>'+money(expenses.reduce((s,e)=>s+e.amount,0))+'</strong></p>'+table(['Tarih','Kategori','Açıklama','Tutar',...(state.admin?['İşlem']:[])],expenses.map(e=>'<tr><td>'+dateName(e.date)+'</td><td><span class="badge">'+esc(e.category)+'</span></td><td class="expense-name">'+esc(e.description)+'</td><td>'+money(e.amount)+'</td>'+(state.admin?'<td><button class="small danger" data-action="delete-expense" data-id="'+e.id+'">Sil</button></td>':'')+'</tr>'))+'</section>';
  }else if(tab==='notices'){
@@ -51,11 +56,44 @@ function render(){
  }else if(tab==='settings'&&state.admin){
   view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><button class="outline" data-action="backup">JSON yedeği indir</button><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek dosyası malik/oturan bilgilerini de içerir; güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
  }
+ syncChargeSelection();
 }
 const input=(name,label,type='text',value='',extra='')=>'<label for="f-'+name+'">'+label+'</label><input id="f-'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'>';
 function openDialog(title,fields,action,submit='Kaydet'){
+ chargeDialogContext=null;
  $('#dialogTitle').textContent=title;$('#dialogFields').innerHTML=fields;$('#dialogError').textContent='';$('#dialogSubmit').textContent=submit;dialogAction=action;$('#modal').showModal();
 }
+function syncChargeSelection(){
+ const eligible=unpaidCharges(state.charges.filter(c=>c.period===selectedMonth));
+ const all=$('#selectAllCharges');if(!all)return;
+ all.disabled=eligible.length===0;all.checked=eligible.length>0&&eligible.every(c=>selectedCharges.has(c.id));all.indeterminate=selectedCharges.size>0&&!all.checked;
+ document.querySelectorAll('[data-charge-select]').forEach(e=>e.checked=selectedCharges.has(Number(e.dataset.chargeSelect)));
+ for(const [action,label] of [['edit-selected-charges','Toplu düzenle'],['remove-selected-charges','Toplu sil']]){
+  const b=document.querySelector('[data-action="'+action+'"]');if(b){b.disabled=!selectedCharges.size;b.textContent=label+(selectedCharges.size?' ('+selectedCharges.size+')':'');}
+ }
+ $('#selectionSummary').textContent=selectedCharges.size+' kayıt seçili · Toplam '+money(eligible.filter(c=>selectedCharges.has(c.id)).reduce((s,c)=>s+c.amount,0));
+}
+function updateChargePreview(){
+ if(!chargeDialogContext||chargeDialogContext.mode!=='edit')return;
+ const amount=Number($('#f-amount')?.value),period=$('#f-period')?.value;
+ const preview=$('#chargePreview');if(preview)preview.textContent=chargeDialogContext.rows.length+' aidat · Yeni ay: '+(period?monthName(period):'—')+' · Yeni toplam: '+(Number.isFinite(amount)&&amount>=0.01?money(Math.round(amount*100)*chargeDialogContext.rows.length):'—');
+}
+function manageCharges(mode,ids){
+ const rows=state.charges.filter(c=>ids.includes(c.id)).map(c=>({...c}));
+ chargeRequest(rows,ids,mode,mode==='edit'?rows[0]?.amount/100:undefined,rows[0]?.period);
+ const total=rows.reduce((sum,c)=>sum+c.amount,0);
+ const summary='<div class="note">'+rows.length+' aidat · '+esc(monthName(rows[0].period))+' · Mevcut toplam: <strong>'+money(total)+'</strong></div><p class="help">'+rows.map(c=>esc(unitName(c.unit_id))).join(', ')+'</p>';
+ const fields=mode==='edit'?input('period','Aidat ayı','month',rows[0].period,'required min="2000-01" max="2099-12"')+input('amount','Her bölüm için yeni aidat (TL)','number',rows[0].amount/100,'required min="0.01" max="10000000" step="0.01"')+'<p class="note" id="chargePreview"></p>':'<p>Seçilen aidatlar ve bunlara ait alacak tutarı silinecek. Ödeme kaydı bulunmadığı için kasa değişmeyecek.</p>'+input('confirmation','Onaylamak için SİL yazın','text','','required autocomplete="off" maxlength="3"');
+ openDialog(mode==='edit'?'Aidatları düzenle':'Seçili aidatları sil',summary+fields,async f=>{
+  if(mode==='delete'&&String(f.get('confirmation')).trim().toLocaleUpperCase('tr-TR')!=='SİL')throw new Error('Onaylamak için SİL yazın.');
+  const payload=chargeRequest(rows,ids,mode,mode==='edit'?Number(f.get('amount')):undefined,f.get('period'));
+  const r=await api('charges/manage','POST',payload);
+  selectedCharges.clear();if(mode==='edit')selectedMonth=payload.period;
+  toast(r.count+' aidat '+(mode==='edit'?'güncellendi.':'silindi.'));
+ },mode==='edit'?'Değişiklikleri kaydet':'Seçili aidatları sil');
+ chargeDialogContext={mode,rows};updateChargePreview();
+}
+document.addEventListener('input',e=>{if(['f-amount','f-period'].includes(e.target.id))updateChargePreview();});
 $('#dialogForm').addEventListener('submit',async e=>{
  e.preventDefault();const button=$('#dialogSubmit');button.disabled=true;
  try{await dialogAction(new FormData(e.target));$('#modal').close();await refresh();}catch(err){$('#dialogError').textContent=err.message;}finally{button.disabled=false;}
@@ -65,7 +103,11 @@ $('#auth').addEventListener('click',async()=>{
  if(state?.admin){try{await api('logout','POST',{});await refresh();toast('Yönetici oturumu kapatıldı.');}catch(e){error(e);}return;}
  openDialog('Yönetici girişi',input('email','Yönetici e-postası','email','','required autocomplete="username"')+input('password','Yönetici şifresi','password','','required autocomplete="current-password" maxlength="1024"'),async f=>{await api('login','POST',{email:f.get('email'),password:f.get('password')});toast('Yönetici paneli açıldı.');},'Giriş yap');
 });
-document.addEventListener('change',e=>{if(e.target.id==='monthFilter'&&e.target.value){selectedMonth=e.target.value;render();}});
+document.addEventListener('change',e=>{
+ if(e.target.id==='monthFilter'&&e.target.value){selectedMonth=e.target.value;selectedCharges.clear();render();}
+ else if(e.target.matches('[data-charge-select]')){const id=Number(e.target.dataset.chargeSelect);if(e.target.checked)selectedCharges.add(id);else selectedCharges.delete(id);syncChargeSelection();}
+ else if(e.target.id==='selectAllCharges'){selectedCharges.clear();if(e.target.checked)for(const c of unpaidCharges(state.charges.filter(c=>c.period===selectedMonth)))selectedCharges.add(c.id);syncChargeSelection();}
+});
 document.addEventListener('submit',async e=>{
  if(e.target.id!=='settingsForm')return;e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;
  try{const f=new FormData(e.target);await api('settings','PUT',{name:f.get('name'),monthlyDues:Number(f.get('monthlyDues')),openingBalance:Number(f.get('openingBalance'))});await refresh();toast('Ayarlar kaydedildi.');}catch(err){error(err);}finally{button.disabled=false;}
@@ -76,6 +118,8 @@ document.addEventListener('click',async e=>{
  const action=btn.dataset.action,id=Number(btn.dataset.id);
  try{
  if(action==='show-notices'){tab='notices';render();}
+ else if(action==='edit-charge'||action==='remove-charge')manageCharges(action==='edit-charge'?'edit':'delete',[id]);
+ else if(action==='edit-selected-charges'||action==='remove-selected-charges')manageCharges(action==='edit-selected-charges'?'edit':'delete',[...selectedCharges]);
  else if(action==='print')window.print();
  else if(action==='backup'){
   btn.disabled=true;

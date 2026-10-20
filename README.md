@@ -10,6 +10,8 @@ GitHub Pages üzerinde çalışan, Acısu United'ın mevcut Supabase projesine b
 - İlk kurulumda 8 daire + 1 dükkân tanımlıdır; bölüm adları düzenlenebilir.
 - Aylık aidat tek işlemle muaf olmayan bölümlere oluşturulur. Aynı bölüm ve ay ikinci kez borçlandırılmaz.
 - Bölümler → Düzenle / Muafiyet → **Aidattan muaf tut** yalnızca yeni borçlandırmalara uygulanır; eski borç ve ödemeler korunur.
+- Aidatlar ekranında kutucuklardan ödeme girilmemiş kayıtları seçip **Toplu düzenle** ile ay/tutar değiştirilebilir; **Toplu sil** ile kaldırılabilir. Her satırda tekil Düzenle / Sil seçenekleri de vardır. Silmede etkilenen toplam gösterilir ve SİL yazılması istenir.
+- Ödeme girilmiş aidatların seçimi ve düzenleme/silme işlemi kapalıdır. Yanlış bir ödeme onayı varsa önce ilgili ödeme kaydı iptal edilmelidir; gerçek tahsilatlar sırf aidatı düzenlemek için iptal edilmemelidir. Eski kayıtlar işlem geçmişinde saklanır.
 - Tam/kısmi ödeme onayı, ödeme iptali, yönetim gideri dahil ortak giderler, duyurular, CSV ve JSON yedeği vardır.
 - Genel bakış üst kartları tüm dönemleri; aylık aidat/gider tabloları seçili ayı kapsar.
 - Açılış kasa bakiyesi negatif olamaz. Aidat değişikliği geçmiş tahakkukları yeniden hesaplamaz.
@@ -45,7 +47,7 @@ Python 3 ile http://localhost:3000 açılır. Üretim yayını herhangi bir Pyth
 
 ## Veritabanı kurulumu ve doğrulama
 
-`supabase/schema.sql` ilk kuruluma ait eklemeli şemadır; kurulu projede tekrar çalıştırmayın. Kurulum Supabase migration geçmişine kaydedilmiştir. Fonksiyon değişikliklerini yeni bir migration olarak uygulayın.
+`supabase/schema.sql` ilk kuruluma ait eklemeli şemadır; kurulu projede tekrar çalıştırmayın. Kurulum Supabase migration geçmişine kaydedilmiştir. Fonksiyon değişikliklerini yeni bir migration olarak uygulayın. `supabase/charge-management.sql` aidat düzenleme/silme yükseltmesidir; `supabase/verify-charge-management.sql` ilgili işlemleri ROLLBACK ile test eder.
 
 `supabase/verify.sql` bütün finansal test işlemlerini **ROLLBACK** ile geri alır. Test için Auth hesabı açmaz ve gerçek finansal kayıt bırakmaz. Kimlikler mevcut `apartman_admins` ve `acisu_admins` tablolarından seçilir.
 
