@@ -83,6 +83,9 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
     if(path==='bank'&&method==='PUT')return rpc('apartman_bank_save',{payload:data});
     if(path==='history')return rpc('apartman_change_history',{});
     if(path==='undo'&&method==='POST')return rpc('apartman_undo',{change_id:data.id});
+    if(path==='payments/unit'&&method==='POST')return rpc('apartman_pay_unit',{payload:data});
+    if(path==='payments/batch'&&method==='POST')return rpc('apartman_payment_batch_info',{batch_id:data.id});
+    if(path==='payments/batch/undo'&&method==='POST')return rpc('apartman_undo_payment_batch',{batch_id:data.id});
     if(path==='state')return rpc('apartman_state',{});
     if(path==='backup')return rpc('apartman_backup',{});
     if(['decisions/manage','tasks/manage'].includes(path)&&method==='POST')return rpc('apartman_work_manage',{kind:path==='decisions/manage'?'decision':'task',payload:data});

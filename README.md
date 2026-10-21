@@ -139,3 +139,15 @@ Yerel doğrulama: 51 Node testi; yükleme olayları/standalone durumu, bağlant�
 Özette güncel kasa, tüm dönemlerden kalan aidat, seçilen ayın ödeme tarihine göre tahsilatı ve önceki aylardan güncel kalan borç dört kısa kartta görünür. Aidat ilerlemesi kompakt tutulur; ayrıntılı gider dağılımı ve tablolar aylık bilançoda yer alır. En yüksek borçlu üç bölüm gösterilir, Tümü penceresi tüm dönemlerde borcu kalan bölümlere erişim verir. Haberlerde her dolu gruptan son bir duyuru, karar ve görev bulunur; boş gruplar gizlenir. Açık işler en fazla üç satırla gösterilir; tüm kayıtlar kendi ekranlarından açılabilir.
 
 Diğer menüsü Bilgiler ve yalnızca yöneticiye görünen Yönetici işlemleri olarak düzenlenir. Telefona ekle hem Diğer menüsünden hem ana içeriğin altındaki karttan kullanılabilir. Başlık, kartlar ve boşluklar küçültülerek özellikle telefonda daha az kaydırma hedeflenir. Finansal kayıtlar ve yetkiler değişmez.
+
+## Toplam borçtan ödeme alma
+
+Yönetici Aidatlar → dairenin **Ödeme al** düğmesinden tek tutar girer. Kayıtlı tüm dönemlerin kalan borcu en eski aydan başlayarak kapatılır; tutar yetmezse son ay kısmi ödenir. Kaydetmeden önce ay bazında dağılım ve ödeme sonrası kalan toplam gösterilir. Daire hesabındaki **Toplam borçtan ödeme al** aynı ekranı açar; belirli bir aya ödeme girme seçenekleri ayrıca korunur. Gelecek dönem için önceden oluşturulmuş borç da kayıtlı toplamın içindedir; henüz oluşturulmamış aidata avans yazılmaz. Borcu aşan tutar kabul edilmez.
+
+Sunucu tutarı kuruş olarak hesaplar ve dağılımı tek transaction içinde kaydeder. Önizlemeden sonra borç/ödeme değişmişse eski bakiye üzerinden kayıt yapılmaz. Aynı açık formun bağlantı hatası sonrası tekrar gönderimi sabit request UUID ile ilk sonucu döndürür; ikinci tahsilat oluşturmaz. Form kapatılıp yeniden açıldığında yeni işlem başlar; belirsiz bağlantı hatasında tekrar ödeme açmadan önce kayıtlar yenilenip kontrol edilmelidir.
+
+Sonuç ekranında her aya ait makbuz ve **Tüm ödemeyi geri al** bulunur. İşlem geçmişinden de grubun tamamı veya tek ödeme geri alınabilir. Toplu geri alma tüm aylarda birlikte başarılı olur; bir satırın geri alınması mümkün değilse hiçbir satır değiştirilmez. Sonradan iptal edilmiş satırlar sonuç ekranında belirtilir.
+
+`apartman_payment_batches` ve `apartman_payment_batch_items` doğrudan erişime kapalıdır. Yeni ödeme/grup bilgisi/grup geri alma RPC'leri yalnızca apartman yöneticisine açıktır. JSON yedeğinde `paymentBatches` ve `paymentBatchItems` bulunur. `supabase/oldest-first-payments.sql` uygulanmış migration kaydıdır; adımları tekrar çalıştırmayın.
+
+Doğrulama: 58 Node testi ve sözdizimi kontrolleri geçti. `verify-oldest-first-payments.sql` eski aydan dağılım, kısmi ödeme, kuruş hassasiyeti, aynı istek tekrarı, stale/taşan tutar koruması, grup geçmişi/yedeği, atomik geri alma ve yetkileri sentetik kayıtlarla ROLLBACK içinde test eder. Mevcut finans ve işlem geri alma SQL kontrolleri de geçti. Yönetici formu DOM taklidiyle test edildi; gerçek yönetici oturumunda ödeme oluşturulmadı.
