@@ -36,6 +36,20 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
     try{return await request('/rest/v1/rpc/'+name,data,current);}
     catch(e){if(e.status===401&&session){const fresh=await token(true);return request('/rest/v1/rpc/'+name,data,fresh);}throw e;}
   }
+  async function storageRequest(path,method,body,mime){
+    const send=async access=>{
+      const headers={apikey:key,...(access?{Authorization:'Bearer '+access}:{})};
+      if(mime){headers['Content-Type']=mime;headers['x-upsert']='false';headers['cache-control']='max-age=60';}
+      else headers['Content-Type']='application/json';
+      const response=await fetchImpl(url+'/storage/v1/'+path,{method,headers,body:mime?body:JSON.stringify(body)});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok){const error=new Error(result.message||result.error||'Belge işlemi tamamlanamadı.');error.status=response.status;throw error;}
+      return result;
+    };
+    let result;
+    try{result=await send(await token());}catch(e){if(e.status===401&&session)result=await send(await token(true));else throw e;}
+    return result;
+  }
   async function logout(){
     const current=session?.access_token;
     save(null);
@@ -52,6 +66,20 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       return {ok:true};
     }
     if(path==='logout')return logout();
+    if(path.startsWith('files/')){
+      const objectPath=data?.path;
+      if(typeof objectPath!=='string'||!/^\d+\/[0-9a-f-]{36}\.(jpg|png|webp|pdf)$/.test(objectPath))throw new Error('Geçersiz belge yolu.');
+      const bucket='apartman-expense-files';
+      if(path==='files/upload'&&method==='POST')return storageRequest('object/'+bucket+'/'+objectPath,'POST',data.file,data.file.type);
+      if(path==='files/remove'&&method==='DELETE')return storageRequest('object/'+bucket,'DELETE',{prefixes:[objectPath]});
+      if(path==='files/sign'&&method==='POST'){
+        const result=await storageRequest('object/sign/'+bucket+'/'+objectPath,'POST',{expiresIn:60});
+        if(typeof result.signedURL!=='string'||!result.signedURL.startsWith('/object/sign/'+bucket+'/'))throw new Error('Belge bağlantısı oluşturulamadı.');
+        return {url:url+'/storage/v1'+result.signedURL};
+      }
+      throw new Error('Geçersiz belge işlemi.');
+    }
+    if(path==='expenses/manage'&&method==='POST')return rpc('apartman_expense_manage',{payload:data});
     if(path==='state')return rpc('apartman_state',{});
     if(path==='backup')return rpc('apartman_action',{action:'backup',payload:{}});
     if(path==='charges/opening'&&method==='POST')return rpc('apartman_opening_charge',{payload:data});
