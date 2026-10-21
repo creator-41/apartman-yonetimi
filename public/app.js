@@ -1,9 +1,9 @@
-import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=payment-1';
-import { openTasks, taskSave, statusName } from './work.js?v=payment-1';
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=payment-1';
+import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=payment-2';
+import { openTasks, taskSave, statusName } from './work.js?v=payment-2';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=payment-2';
 import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=payment-1';
+import { createApi } from './transport.js?v=payment-2';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -51,17 +51,17 @@ function newsHTML(limit=Infinity){
  return groups.map(([title,target,rows,html])=>'<section class="news-group"><div class="toolbar"><h3>'+title+'</h3><button class="small outline" data-tab="'+target+'">'+(rows.length>limit?'Tümü ('+rows.length+')':'Aç')+'</button></div>'+(rows.slice(0,limit).map(html).join('')||'<p class="muted">Henüz kayıt yok.</p>')+'</section>').join('');
 }
 function bankHTML(){
- if(!state.settings.iban)return '';
+ if(!state.settings.iban)return state.admin?'<section class="panel bank-card"><div><h2>Aidat ödeme hesabı</h2><p class="muted">IBAN henüz eklenmedi.</p></div><button class="primary" data-tab="settings">Ödeme hesabı ekle</button></section>':'';
  return '<section class="panel bank-card"><div><h2>Aidat ödeme hesabı</h2><p>'+esc(state.settings.accountHolder)+'</p><p class="iban">'+esc(formatIban(state.settings.iban))+'</p></div><button class="outline" data-action="copy-iban">IBAN kopyala</button></section>';
 }
 function bankForm(){
- return '<section class="panel history"><h2>Aidat ödeme hesabı</h2><form id="bankForm" class="setting-form"><label for="accountHolder">Hesap sahibi</label><input id="accountHolder" name="accountHolder" maxlength="100" value="'+esc(state.settings.accountHolder)+'"><label for="iban">IBAN</label><input id="iban" name="iban" maxlength="40" placeholder="TR…" autocomplete="off" value="'+esc(formatIban(state.settings.iban))+'"><p class="help">Kaydedilen hesap bilgileri ortak Aidatlar ekranında görünür. Kaldırmak için IBAN alanını boşaltın.</p><button class="primary" type="submit">Ödeme hesabını kaydet</button><p id="bankError" role="alert"></p></form></section>';
+ return '<section class="panel"><h2>Aidat ödeme hesabı</h2><form id="bankForm" class="setting-form"><label for="accountHolder">Hesap sahibi</label><input id="accountHolder" name="accountHolder" maxlength="100" value="'+esc(state.settings.accountHolder)+'"><label for="iban">IBAN</label><input id="iban" name="iban" maxlength="40" placeholder="TR…" autocomplete="off" value="'+esc(formatIban(state.settings.iban))+'"><p class="help">Kaydedilen hesap bilgileri ortak Aidatlar ekranında görünür. Kaldırmak için IBAN alanını boşaltın.</p><button class="primary" type="submit">Ödeme hesabını kaydet</button><p id="bankError" role="alert"></p></form></section>';
 }
 async function copyPaymentText(text,label){
  try{await navigator.clipboard.writeText(text);toast(label);}
  catch{openReadDialog('Metni kopyala','<textarea id="paymentCopy" readonly rows="7">'+esc(text)+'</textarea>');$('#paymentCopy').focus();$('#paymentCopy').select();}
 }
-function moreLinks(){return '<div class="more-grid">'+[['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular, tarihler ve durumlar'],['report','Aylık hesap özeti','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','Ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
+function moreLinks(){return '<div class="more-grid">'+[['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular, tarihler ve durumlar'],['report','Aylık hesap özeti','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','IBAN, ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
 function render(){
  document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news'].includes(tab))));
  const view=$('#view'),charges=state.charges.filter(c=>c.period===selectedMonth),expenses=state.expenses.filter(e=>e.date.startsWith(selectedMonth));
@@ -96,7 +96,7 @@ function render(){
  }else if(tab==='settings'&&state.admin){
   view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><button class="outline" data-action="backup">JSON kayıt yedeği indir</button><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek, kayıtları ve belge listesini içerir; yüklenen dosyalar ayrıca saklanır. Malik/oturan bilgileri de bulunduğu için güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
  }
- if(tab==='settings'&&state.admin)view.innerHTML+=bankForm();
+ if(tab==='settings'&&state.admin)view.innerHTML=bankForm()+view.innerHTML;
  if(tab==='overview'){
   const tasks=openTasks(state.tasks||[],today()).slice(0,5);
   if(tasks.length)view.innerHTML+='<section class="panel history"><div class="toolbar"><h2>Yapılacak işler</h2><button class="outline small" data-tab="tasks">Tümü</button></div>'+tasks.map(taskRow).join('')+'</section>';
