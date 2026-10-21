@@ -1,6 +1,6 @@
 import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js';
+import { createApi } from './transport.js?v=accounts-1';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
