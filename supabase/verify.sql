@@ -1,7 +1,7 @@
 -- Run in SQL Editor. All test data is rolled back; identity sequence gaps are normal.
 begin;
 select set_config('test.apartman_admin',(select user_id::text from public.apartman_admins order by created_at limit 1),true);
-select set_config('test.club_other',coalesce((select user_id::text from public.acisu_admins where user_id not in(select user_id from public.apartman_admins) limit 1),'00000000-0000-0000-0000-000000000001'),true);
+select set_config('test.club_other','00000000-0000-0000-0000-000000000001',true);
 set local role authenticated;
 select set_config('request.jwt.claim.sub',current_setting('test.apartman_admin'),true);
 do $test$

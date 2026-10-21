@@ -23,7 +23,7 @@ test('Login, administrator RPC mapping, and local logout',async()=>{
  assert.deepEqual(calls[2].body,{action:'unit',payload:{id:2,label:'Daire 2',exempt:true}});
  assert.equal(calls[2].headers.Authorization,'Bearer a');
  await api('payments/4','DELETE',{});assert.deepEqual(calls[3].body,{action:'delete-payment',payload:{id:4}});
- await api('backup');assert.equal(calls[4].body.action,'backup');
+ await api('backup');assert.match(calls[4].url,/rpc\/apartman_backup$/);
  await api('logout','POST',{});assert.equal(map.size,0);assert.match(calls[5].url,/logout\?scope=local$/);
 });
 test('Club user without apartment membership is logged out and rejected',async()=>{

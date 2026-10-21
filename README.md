@@ -73,17 +73,23 @@ Python 3 ile http://localhost:3000 açılır. Üretim yayını herhangi bir Pyth
 
 `supabase/expense-receipts.sql` gider/belge yükseltmesinin tam SQL kaydıdır. Uygulanan yükseltme küçük adımlar halinde migration geçmişine kaydedilmiştir; kurulu projede tekrar çalıştırmayın. `supabase/verify-expense-receipts.sql` gider, kasa, dosya kuralları ve yetkileri ROLLBACK ile doğrular; testte gerçek dosya yüklenmez.
 
-`supabase/verify.sql` bütün finansal test işlemlerini **ROLLBACK** ile geri alır. Test için Auth hesabı açmaz ve gerçek finansal kayıt bırakmaz. Kimlikler mevcut `apartman_admins` ve `acisu_admins` tablolarından seçilir.
+`supabase/verify.sql` bütün finansal test işlemlerini **ROLLBACK** ile geri alır. Test için Auth hesabı açmaz ve gerçek finansal kayıt bırakmaz. Yönetici kimliği yalnızca `apartman_admins` tablosundan seçilir; yetkisiz kullanıcı için sabit bir test kimliği kullanılır.
 
 ```sh
 npm run check
 npm test
 ```
 
-JavaScript testleri oturum yenileme, ayrı yönetici kontrolü, RPC eşlemesi ve hata yönetimini kontrol eder. Canlı veritabanındaki doğrulama; muafiyet, mükerrer aidat, fazla/kısmi ödeme, gider, kasa, ödeme iptali, anonim erişim ve diğer Acısu yöneticisinin yetkisizliğini kapsar.
+JavaScript testleri oturum yenileme, ayrı yönetici kontrolü, RPC eşlemesi ve hata yönetimini kontrol eder. Canlı veritabanındaki doğrulama; muafiyet, mükerrer aidat, fazla/kısmi ödeme, gider, kasa, ödeme iptali, anonim erişim ve apartman yöneticisi olmayan kimliğin yetkisizliğini kapsar.
 
 ## Yedek ve önceki sürüm
 
 Yönetim → JSON yedeği indir ile kayıtlar dışa aktarılabilir. Dosya malik/oturan isimlerini içerir; güvenli yerde saklayın. Otomatik yedekleme ve JSON içe aktarma bu sürümde yoktur. Supabase ücretsiz plandaysa hareketsizlikte duraklatma ve proje genelindeki ücretsiz limitler uygulanır.
 
 Önceki Sites uygulamasının gerçek kayıtları otomatik taşınmamıştır. SQLite sunucusu Git geçmişinde korunur; güncel sürüm Supabase kullanır.
+
+## Kararlar ve işler
+
+Diğer → Kararlar / Yapılacak işler üzerinden tüm kullanıcılar kayıtları görebilir. Yönetici; karar tarihi, numarası, metni ve imzalı sayfanın fotoğraf/PDF kopyasını ekleyebilir. İşlere sorumlu, hedef tarih, durum ve ilgili karar atanır. Ana ekran açık işleri hedef tarihine göre gösterir; gecikenler işaretlenir. Tamamlanan işler ayrıca filtrelenir. Kayıtlar arşivlenip geri alınabilir. Eşzamanlı düzenlemeler sürüm kontrolüyle korunur.
+
+Karar belgeleri mevcut özel belge deposunu kullanır; önce yalnızca yönetici görür, ortak ekranda gösterme ayrıca seçilir. Dijital belge fiziksel imzalı kararın kopyasıdır. JSON yedeğine karar ve iş kayıtları ile belge metadata listesi dahildir; dosya içerikleri dahil değildir. `supabase/decisions-tasks.sql` eklemeli yükseltmedir; `verify-decisions-tasks.sql` kayıt, durum, arşiv, sürüm, kasa ve yetkileri ROLLBACK ile doğrular.
