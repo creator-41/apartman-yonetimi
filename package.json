@@ -9,6 +9,6 @@
   "scripts": {
     "start": "python3 -m http.server 3000 --directory public",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check public/app.js && node --check public/transport.js && node --check public/config.js && node --check public/charge-management.js && node --check public/reports.js && node --check public/expense-files.js && node --check public/work.js && node --check public/payment-tools.js && node --check public/receipts.js && node --check public/receipt-page.js && node --check public/history.js"
+    "check": "node --check public/app.js && node --check public/transport.js && node --check public/config.js && node --check public/charge-management.js && node --check public/reports.js && node --check public/expense-files.js && node --check public/work.js && node --check public/payment-tools.js && node --check public/receipts.js && node --check public/receipt-page.js && node --check public/history.js && node --check public/dues-filters.js"
   }
 }

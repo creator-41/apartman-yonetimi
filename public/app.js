@@ -1,11 +1,12 @@
-import { changeInfo } from './history.js?v=undo-1';
-import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=undo-1';
-import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=undo-1';
-import { openTasks, taskSave, statusName } from './work.js?v=undo-1';
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=undo-1';
-import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=undo-1';
+import { filterUnits } from './dues-filters.js?v=filters-1';
+import { changeInfo } from './history.js?v=filters-1';
+import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=filters-1';
+import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=filters-1';
+import { openTasks, taskSave, statusName } from './work.js?v=filters-1';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=filters-1';
+import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=filters-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=undo-1';
+import { createApi } from './transport.js?v=filters-1';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -13,6 +14,7 @@ const api=createApi({...config,storage});
 const selectedCharges=new Set();
 let chargeDialogContext=null;
 let bulkMode=false;
+let unitQuery="",duesFilter="all";
 let reportContext=null;
 let documentTarget=null;
 let workFilter="open";let decisionArchive=false;
@@ -85,6 +87,18 @@ function historyHTML(){
   return '<article class="change-item"><div class="toolbar"><h3>'+esc(info.title)+'</h3>'+(info.canUndo?'<button class="outline small" data-action="undo-change" data-id="'+entry.id+'">Geri al</button>':'<span class="badge">'+(entry.undone_at?'Geri alındı':'Geri alma kaydı')+'</span>')+'</div>'+changeSummary(entry)+'<small>'+esc(timeName(entry.created_at))+' · '+esc(entry.actor_label)+'</small>'+(entry.undone_at?'<p class="help">Geri alan: '+esc(entry.undone_label)+' · '+esc(timeName(entry.undone_at))+'</p>':'')+'</article>';
  }).join('')||'<p class="empty">Yeni ödeme ve gider işlemleri burada görünecek.</p>')+'<details class="secondary-section"><summary>Diğer işlem kayıtları</summary>'+table(['Tarih','İşlem','Yönetici'],(state.audit||[]).map(a=>'<tr><td>'+esc(timeName(a.created_at))+'</td><td>'+esc(a.action)+'</td><td>'+esc(a.actor?'Yönetici '+a.actor.slice(0,8):'Yönetici')+'</td></tr>'))+'</details></section>';
 }
+function visibleUnits(){return filterUnits(state.units,state.charges,selectedMonth,unitQuery,duesFilter);}
+function visibleUnpaidCharges(){const ids=new Set(visibleUnits().map(u=>u.id));return unpaidCharges(state.charges.filter(c=>c.period===selectedMonth&&ids.has(c.unit_id)));}
+function duesFiltersHTML(count){
+ const hint=duesFilter==='debt'?'Seçili ay ve önceki aylardan kalan borçlar.':duesFilter==='partial'?'Seçili ayın aidatını kısmen ödeyenler.':duesFilter==='paid'?'Seçili ayın aidatını ödeyen ve önceki borcu kalmayanlar.':'';
+ return '<div class="dues-filters"><div><label for="unitSearch">Daire / dükkân ara</label><input id="unitSearch" type="search" maxlength="100" autocomplete="off" placeholder="Örn. Daire 3" value="'+esc(unitQuery)+'"></div><div><label for="duesFilter">Ödeme durumu</label><select id="duesFilter">'+[['all','Hepsi'],['debt','Borcu olanlar'],['partial','Kısmi ödeyenler'],['paid','Ödeyenler']].map(([value,label])=>'<option value="'+value+'" '+(duesFilter===value?'selected':'')+'>'+label+'</option>').join('')+'</select></div>'+((unitQuery||duesFilter!=='all')?'<button class="outline" data-action="clear-dues-filter">Temizle</button>':'')+'</div><p class="help filter-summary">'+count+' / '+state.units.length+' bölüm gösteriliyor.'+(hint?' '+hint:'')+'</p>';
+}
+function updateUnitSearch(e){
+ if(e.isComposing)return;
+ const position=e.target.selectionStart;unitQuery=e.target.value;selectedCharges.clear();render();
+ const search=$('#unitSearch');search.focus();if(position!==null)search.setSelectionRange(position,position);
+}
+document.addEventListener('compositionend',e=>{if(e.target.id==='unitSearch')updateUnitSearch(e);});
 function moreLinks(){return '<div class="more-grid">'+[['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular, tarihler ve durumlar'],['report','Aylık bilanço','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','IBAN, ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
 function render(){
  document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news','history'].includes(tab))));
@@ -94,15 +108,16 @@ function render(){
   const categories=state.categories.map(category=>({category,total:expenses.filter(e=>e.category===category).reduce((s,e)=>s+e.amount,0)})).filter(c=>c.total);
   view.innerHTML='<div class="toolbar"><h2>Apartman özeti</h2><div class="actions"><button class="outline" data-tab="report">Aylık bilanço</button>'+monthFilter()+'</div></div>'+cards()+(state.admin?'<div class="quick-actions"><button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button></div>':'')+'<div class="columns"><section class="panel"><div class="toolbar"><h2>Aylık aidat durumu</h2>'+'</div><p class="muted">'+esc(monthName(selectedMonth))+' · '+paidCount+' / '+charges.length+' bölüm ödedi</p><progress max="'+(expected||1)+'" value="'+paid+'" aria-label="Aidat tahsilat oranı"></progress><div class="bar-row"><span>Tahsil edilen</span><strong>'+money(paid)+'</strong></div><div class="bar-row"><span>Beklenen</span><strong>'+money(expected)+'</strong></div><div class="bar-row"><span>Kalan alacak</span><strong>'+money(expected-paid)+'</strong></div>'+(!charges.length?'<p class="empty">Bu ay için aidat oluşturulmamış.</p>':'')+'<h3 class="section-title">Bu ayın gider dağılımı</h3>'+ (categories.map(c=>'<div class="bar-row"><span>'+esc(c.category)+'</span><strong>'+money(c.total)+'</strong></div>').join('')||'<p class="muted">Bu ay gider kaydı yok.</p>')+'</section><section class="panel"><div class="toolbar"><h2>Apartmandan haberler</h2><button class="small outline" data-tab="news">Tümü</button></div>'+newsHTML(2)+'</section></div>';
  }else if(tab==='dues'){
-  const eligible=unpaidCharges(charges);
+  const visible=visibleUnits();
+  const eligible=visibleUnpaidCharges();
   for(const id of selectedCharges)if(!eligible.some(c=>c.id===id))selectedCharges.delete(id);
-  const unitsHTML=state.units.map(u=>{
+  const unitsHTML=visible.map(u=>{
    const c=charges.find(c=>c.unit_id===u.id),remaining=c?c.amount-c.paid:0,old=earlierDebt(u.id);
    const badge=!c?(u.exempt?'Yönetim kararı ile muaf':'Aidat oluşturulmadı'):remaining===0?'Ödendi':c.paid?'Kısmi ödeme':'Bekliyor';
    const selection=state.admin&&bulkMode?'<label class="select-charge"><input type="checkbox" data-charge-select="'+(c?.id||'')+'" aria-label="'+esc(u.label)+' aidatını seç" '+(!c||c.paid>0?'disabled':'')+(c&&selectedCharges.has(c.id)?' checked':'')+'> Seç</label>':'';
    return '<article class="dues-card">'+selection+'<div class="dues-main"><div><h3>'+esc(u.label)+'</h3>'+(c?.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'<span class="badge '+(remaining?(c.paid?'partial':'due'):'')+'">'+badge+'</span></div><div class="dues-balance"><small>Bu ay kalan</small><strong>'+(c?money(remaining):'—')+'</strong></div></div>'+(old?'<p class="old-debt">Önceki aylardan: <strong>'+money(old)+'</strong></p>':'')+'<div class="dues-actions"><button class="outline small" data-action="unit-detail" data-id="'+u.id+'">Ayrıntılar</button>'+(state.admin&&state.charges.some(c=>c.unit_id===u.id&&c.amount>c.paid)?'<button class="outline small" data-action="reminder" data-id="'+u.id+'">Hatırlatma hazırla</button>':'')+(state.admin&&remaining>0?'<button class="primary" data-action="pay" data-id="'+c.id+'">Ödeme al</button>':'')+(state.admin&&c?chargeMenu(c):'')+'</div></article>';
   }).join('');
-  view.innerHTML=bankHTML()+'<section class="panel"><div class="toolbar"><h2>Aidatlar</h2>'+monthFilter()+'</div><div class="toolbar"><p class="muted">'+charges.filter(c=>c.paid>=c.amount).length+' / '+charges.length+' bölüm ödedi · Kalan '+money(charges.reduce((sum,c)=>sum+c.amount-c.paid,0))+'</p>'+(state.admin?'<div class="actions"><button class="primary" data-action="charge">Aylık aidat oluştur</button><button class="outline" data-action="toggle-bulk" aria-pressed="'+bulkMode+'">'+(bulkMode?'Toplu işlemi kapat':'Toplu işlem')+'</button></div>':'')+'</div>'+(state.admin&&bulkMode?'<div class="bulk-tools"><label class="check"><input type="checkbox" id="selectAllCharges" aria-label="Ödeme girilmemiş tüm aidatları seç"> Tümünü seç</label><div class="actions"><button class="outline" data-action="edit-selected-charges" disabled>Toplu düzenle</button><button class="danger" data-action="remove-selected-charges" disabled>Toplu sil</button></div><p class="help" id="selectionSummary"></p><p class="help">Yalnızca ödeme girilmemiş aidatlar seçilebilir.</p></div>':'')+'<div class="dues-grid">'+unitsHTML+'</div><details class="secondary-section"><summary>Dışa aktar</summary><button class="outline small" data-action="csv">CSV indir</button></details></section>'+(state.admin?'<details class="panel history"><summary>Ödeme kayıtları · '+esc(monthName(selectedMonth))+'</summary><p class="help">Yanlış kaydedilmiş ödemeleri buradan iptal edebilirsiniz. İptal edilen tutar yeniden borca eklenir.</p>'+table(['Bölüm','Ödeme tarihi','Tutar','Not','İşlem'],state.payments.filter(p=>charges.some(c=>c.id===p.charge_id)).map(p=>'<tr><td>'+esc(unitName(charges.find(c=>c.id===p.charge_id).unit_id))+'</td><td>'+dateName(p.date)+'</td><td>'+money(p.amount)+'</td><td class="expense-name">'+esc(p.note)+'</td><td><button class="small outline" data-action="receipt" data-id="'+p.id+'">Makbuz</button> <button class="small danger" data-action="delete-payment" data-id="'+p.id+'">Ödemeyi iptal et</button></td></tr>'))+'</details>':'');
+  view.innerHTML=bankHTML()+'<section class="panel"><div class="toolbar"><h2>Aidatlar</h2>'+monthFilter()+'</div><div class="toolbar"><p class="muted">'+charges.filter(c=>c.paid>=c.amount).length+' / '+charges.length+' bölüm ödedi · Kalan '+money(charges.reduce((sum,c)=>sum+c.amount-c.paid,0))+'</p>'+(state.admin?'<div class="actions"><button class="primary" data-action="charge">Aylık aidat oluştur</button><button class="outline" data-action="toggle-bulk" aria-pressed="'+bulkMode+'">'+(bulkMode?'Toplu işlemi kapat':'Toplu işlem')+'</button></div>':'')+'</div>'+(state.admin&&bulkMode?'<div class="bulk-tools"><label class="check"><input type="checkbox" id="selectAllCharges" aria-label="Görünen ödeme girilmemiş aidatları seç"> Görünenleri seç</label><div class="actions"><button class="outline" data-action="edit-selected-charges" disabled>Toplu düzenle</button><button class="danger" data-action="remove-selected-charges" disabled>Toplu sil</button></div><p class="help" id="selectionSummary"></p><p class="help">Yalnızca ödeme girilmemiş aidatlar seçilebilir.</p></div>':'')+duesFiltersHTML(visible.length)+'<div class="dues-grid">'+(unitsHTML||'<div class="empty">Aramaya uygun bölüm bulunamadı.</div>')+'</div><details class="secondary-section"><summary>Dışa aktar</summary><button class="outline small" data-action="csv">CSV indir</button></details></section>'+(state.admin?'<details class="panel history"><summary>Ödeme kayıtları · '+esc(monthName(selectedMonth))+'</summary><p class="help">Yanlış kaydedilmiş ödemeleri buradan iptal edebilirsiniz. İptal edilen tutar yeniden borca eklenir.</p>'+table(['Bölüm','Ödeme tarihi','Tutar','Not','İşlem'],state.payments.filter(p=>charges.some(c=>c.id===p.charge_id)).map(p=>'<tr><td>'+esc(unitName(charges.find(c=>c.id===p.charge_id).unit_id))+'</td><td>'+dateName(p.date)+'</td><td>'+money(p.amount)+'</td><td class="expense-name">'+esc(p.note)+'</td><td><button class="small outline" data-action="receipt" data-id="'+p.id+'">Makbuz</button> <button class="small danger" data-action="delete-payment" data-id="'+p.id+'">Ödemeyi iptal et</button></td></tr>'))+'</details>':'');
  }else if(tab==='expenses'){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Ortak giderler</h2><div class="actions">'+monthFilter()+(state.admin?'<button class="primary" data-action="expense">Gider ekle</button>':'')+'</div></div><p class="muted">'+esc(monthName(selectedMonth))+' toplamı: <strong>'+money(expenses.reduce((s,e)=>s+e.amount,0))+'</strong></p>'+table(['Tarih','Kategori','Açıklama','Tutar','Belge',...(state.admin?['İşlem']:[])],expenses.map(e=>'<tr><td>'+dateName(e.date)+'</td><td><span class="badge">'+esc(e.category)+'</span></td><td class="expense-name">'+esc(e.description)+'</td><td>'+money(e.amount)+'</td><td>'+(state.admin||(e.files||[]).length?'<button class="small outline" data-action="expense-files" data-id="'+e.id+'">Belgeler'+((e.files||[]).length?' ('+e.files.length+')':'')+'</button>':'—')+'</td>'+(state.admin?'<td><button class="small outline" data-action="edit-expense" data-id="'+e.id+'">Düzenle</button> <button class="small danger" data-action="delete-expense" data-id="'+e.id+'">Sil</button></td>':'')+'</tr>'))+'</section>';
  }else if(tab==='news'){
@@ -195,7 +210,7 @@ function editWork(kind,row){
 }
 
 function syncChargeSelection(){
- const eligible=unpaidCharges(state.charges.filter(c=>c.period===selectedMonth));
+ const eligible=visibleUnpaidCharges();
  const all=$('#selectAllCharges');if(!all)return;
  all.disabled=eligible.length===0;all.checked=eligible.length>0&&eligible.every(c=>selectedCharges.has(c.id));all.indeterminate=selectedCharges.size>0&&!all.checked;
  document.querySelectorAll('[data-charge-select]').forEach(e=>e.checked=selectedCharges.has(Number(e.dataset.chargeSelect)));
@@ -224,7 +239,7 @@ function manageCharges(mode,ids){
  },mode==='edit'?'Değişiklikleri kaydet':'Seçili aidatları sil');
  chargeDialogContext={mode,rows};updateChargePreview();
 }
-document.addEventListener('input',e=>{if(['f-amount','f-period'].includes(e.target.id))updateChargePreview();});
+document.addEventListener('input',e=>{if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id))updateChargePreview();});
 $('#dialogForm').addEventListener('submit',async e=>{
  e.preventDefault();if(!dialogAction)return;const button=$('#dialogSubmit');button.disabled=true;
  try{await dialogAction(new FormData(e.target));$('#modal').close();await refresh();if(createdPaymentId){const paymentId=createdPaymentId;createdPaymentId=null;showReceipt(paymentId);}}catch(err){$('#dialogError').textContent=err.message;}finally{button.disabled=false;}
@@ -236,11 +251,12 @@ $('#auth').addEventListener('click',async()=>{
  openDialog('Yönetici girişi',input('email','Yönetici e-postası','email','','required autocomplete="username"')+input('password','Yönetici şifresi','password','','required autocomplete="current-password" maxlength="1024"'),async f=>{await api('login','POST',{email:f.get('email'),password:f.get('password')});toast('Yönetici paneli açıldı.');},'Giriş yap');
 });
 document.addEventListener('change',e=>{
- if(e.target.id==='workFilter'){workFilter=e.target.value;render();}
+ if(e.target.id==='duesFilter'){duesFilter=e.target.value;selectedCharges.clear();render();$('#duesFilter').focus();}
+ else if(e.target.id==='workFilter'){workFilter=e.target.value;render();}
  else if(e.target.id==='decisionArchive'){decisionArchive=e.target.checked;render();}
  else if(e.target.id==='monthFilter'&&e.target.value){selectedMonth=e.target.value;selectedCharges.clear();render();}
  else if(e.target.matches('[data-charge-select]')){const id=Number(e.target.dataset.chargeSelect);if(e.target.checked)selectedCharges.add(id);else selectedCharges.delete(id);syncChargeSelection();}
- else if(e.target.id==='selectAllCharges'){selectedCharges.clear();if(e.target.checked)for(const c of unpaidCharges(state.charges.filter(c=>c.period===selectedMonth)))selectedCharges.add(c.id);syncChargeSelection();}
+ else if(e.target.id==='selectAllCharges'){selectedCharges.clear();if(e.target.checked)for(const c of visibleUnpaidCharges())selectedCharges.add(c.id);syncChargeSelection();}
 });
 document.addEventListener('submit',async e=>{
  if(e.target.id==='bankForm'){
@@ -264,6 +280,7 @@ document.addEventListener('click',async e=>{
   const next=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
   if(next>='2000-01'&&next<='2099-12'){selectedMonth=next;selectedCharges.clear();render();}
  }
+ else if(action==='clear-dues-filter'){unitQuery='';duesFilter='all';selectedCharges.clear();render();$('#unitSearch').focus();}
  else if(action==='toggle-bulk'){bulkMode=!bulkMode;selectedCharges.clear();render();}
  else if(action==='receipt'){await refresh();showReceipt(id);}
  else if(action==='download-receipt'){btn.disabled=true;try{const current=await api('state');await downloadReceipt(paymentReceipt(current,id),receiptLink(location.href,id));}catch(err){$('#dialogError').textContent=err.message;}finally{btn.disabled=false;}}
@@ -380,5 +397,5 @@ document.addEventListener('click',async e=>{
  }catch(err){error(err);btn.disabled=false;}
 });
 refresh().catch(error);
-setInterval(()=>{if(!$('#modal').open&&!document.hidden&&!$('#settingsForm')&&!$('#bankForm'))refresh().catch(error);},60000);
+setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&!$('#settingsForm')&&!$('#bankForm'))refresh().catch(error);},60000);
 
