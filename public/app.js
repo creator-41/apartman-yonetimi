@@ -220,7 +220,7 @@ document.addEventListener('click',async e=>{
  }else if(action==='expense'){
  editExpense();
  }else if(action==='edit-expense'){
- editExpense(state.expenses.find(expense=>expense.id===id));
+ const expense=state.expenses.find(expense=>expense.id===id);if(!expense)throw new Error('Gider bulunamadı. Listeyi yenileyin.');editExpense(expense);
  }else if(action==='expense-files'){
  showExpenseFiles(id);
  }else if(action==='upload-file'){
