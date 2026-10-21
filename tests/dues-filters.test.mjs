@@ -1,0 +1,10 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {filterUnits} from '../public/dues-filters.js';
+const units=[{id:1,label:'Daire 1',owner:'Private Name'},{id:2,label:'Daire 2'},{id:3,label:'Daire 3'},{id:4,label:'Daire 4',exempt:true},{id:5,label:'Dükkân'}];
+const charges=[{id:1,unit_id:1,period:'2026-10',amount:50000,paid:50000},{id:2,unit_id:1,period:'2026-09',amount:50000,paid:20000},{id:3,unit_id:2,period:'2026-10',amount:50000,paid:25000},{id:4,unit_id:3,period:'2026-10',amount:50000,paid:50000},{id:5,unit_id:5,period:'2026-11',amount:50000,paid:0}];
+const ids=(q='',f='all',month='2026-10')=>filterUnits(units,charges,month,q,f).map(u=>u.id);
+test('Debt filter includes arrears on a paid month and excludes future-only charges',()=>{assert.deepEqual(ids('','debt'),[1,2]);assert.deepEqual(ids('','paid'),[3]);});
+test('Partial filter uses selected month; exempt/missing dues are not classified paid',()=>{assert.deepEqual(ids('','partial'),[2]);assert.deepEqual(ids(),[1,2,3,4,5]);assert.deepEqual(ids('','partial','2026-09'),[1]);});
+test('Search combines with status and handles Turkish case and diacritics using labels only',()=>{assert.deepEqual(ids('DAİRE 2','partial'),[2]);assert.deepEqual(ids('DAIRE 3','debt'),[]);assert.deepEqual(ids('  DUKKAN '),[5]);assert.deepEqual(ids('private'),[]);});
+test('Filtering preserves source order and records and supports an empty result',()=>{const snapshot=JSON.stringify({units,charges});assert.deepEqual(ids('unknown'),[]);ids('','debt');assert.equal(JSON.stringify({units,charges}),snapshot);});

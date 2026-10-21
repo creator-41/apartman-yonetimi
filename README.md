@@ -119,3 +119,9 @@ Yönetici Diğer → İşlem geçmişi üzerinden bu yükseltmeden sonra yapıla
 Sunucu mevcut kayıt ile işlem sonrasındaki snapshotı karşılaştırır; aynı kayıt sonradan değişmişse önce en son değişiklik geri alınmalıdır. Ödeme geri yüklenirken aidatın hâlâ var olması ve tutarın kalan borcu aşmaması kontrol edilir. Belge eklenmiş giderin oluşturulmasını geri almak için önce belgeleri kaldırmak gerekir. Geri alınmış işlem ikinci kez çalıştırılamaz; telafi kaydı ayrıca saklanır. Ödeme geri yüklenince özgün kimliği/makbuz numarası korunur. Kasa ve borçlar mevcut kayıtlardan yeniden hesaplanır.
 
 `apartman_changes` RLS ile kapalıdır; history/undo RPC yalnızca apartman yöneticilerine açıktır. Yönetici etiketi oturumun email claiminden, yoksa kullanıcı kimliğinin ilk 8 karakterinden oluşur. Başka uygulamanın kullanıcıları veya tabloları okunmaz. JSON yedeğine tüm journal kayıtları dahil edilir. `supabase/financial-undo.sql` migration kaydıdır; `verify-financial-undo.sql` ödeme/gider yaşam döngüsü, stale/duplicate koruması, belge bağımlılığı, kasa/borç ve yetkileri ROLLBACK ile test eder.
+
+## Aidat araması ve filtreler
+
+Aidatlar ekranında daire/dükkân adına göre arama ile Hepsi, Borcu olanlar, Kısmi ödeyenler ve Ödeyenler filtreleri birlikte çalışır. Borcu olanlar seçili ay ve önceki aylardan kalan borcu içerir; sonraki ayların aidatları filtreye dahil edilmez. Kısmi ödeme seçili aya göredir. Ödeyenler seçili ay aidatını tamamlayan ve önceki borcu kalmayan bölümlerdir; muaf veya aidat oluşturulmamış bölümler ödeme yapmış sayılmaz. Üstteki aylık toplamlar tüm bölümlere aittir; filtre sonucu ayrıca sayılır. Arama yalnızca bölüm adı kullanır, malik/oturan bilgisi kullanmaz.
+
+Arama/filtre değişiminde toplu seçim temizlenir. Görünenleri seç yalnızca filtrede görünen, seçili ayda hiç ödeme girilmemiş aidatları kapsar. Arama yazılırken imleç korunur; Temizle varsayılan listeyi geri getirir. Finansal veri yazımı veya veritabanı değişikliği yapılmaz.
