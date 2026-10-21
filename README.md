@@ -133,3 +133,9 @@ Ana sayfadaki Telefona ekle düğmesi desteklenen tarayıcıda kullanıcının o
 `manifest.webmanifest` ve ikonlar GitHub Pages alt dizinine göre bağıl yolludur. Service worker yalnızca kendi alt dizinini kapsar. Yalnızca offline.html ve offline.css önbelleğe alınır; uygulama kodu, oturum, API, banka/ödeme/gider kayıtları ve dosyalar Service Worker cache'ine alınmaz. Finansal çağrılar ve yazmalar yakalanmaz, kuyruklanmaz. İnternetsiz yeni açılışta statik bağlantı ekranı gösterilir; açık sayfada bağlantı kesilirse güncellik uyarısı görünür. Normal açılışlar ağdan alınarak güncelleme kilitlenmesi önlenir. Eski cache temizliği yalnızca bu uygulamanın kendi cache adıyla sınırlıdır.
 
 Yerel doğrulama: 51 Node testi; yükleme olayları/standalone durumu, bağlantı uyarısı, SW ağ stratejisi, başka uygulama cache'lerine dokunmama ve finansal istekleri yakalamama testleri dahildir. İkon boyutları ayrıca doğrulanır. Kaynaklar: https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable ve https://support.apple.com/en-lamr/guide/iphone/iphea86e5236/ios .
+
+## Sade özet düzeni
+
+Özette güncel kasa, tüm dönemlerden kalan aidat, seçilen ayın ödeme tarihine göre tahsilatı ve önceki aylardan güncel kalan borç dört kısa kartta görünür. Aidat ilerlemesi kompakt tutulur; ayrıntılı gider dağılımı ve tablolar aylık bilançoda yer alır. En yüksek borçlu üç bölüm gösterilir, Tümü penceresi tüm dönemlerde borcu kalan bölümlere erişim verir. Haberlerde her dolu gruptan son bir duyuru, karar ve görev bulunur; boş gruplar gizlenir. Açık işler en fazla üç satırla gösterilir; tüm kayıtlar kendi ekranlarından açılabilir.
+
+Diğer menüsü Bilgiler ve yalnızca yöneticiye görünen Yönetici işlemleri olarak düzenlenir. Telefona ekle hem Diğer menüsünden hem ana içeriğin altındaki karttan kullanılabilir. Başlık, kartlar ve boşluklar küçültülerek özellikle telefonda daha az kaydırma hedeflenir. Finansal kayıtlar ve yetkiler değişmez.
