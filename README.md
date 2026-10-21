@@ -4,6 +4,11 @@ GitHub Pages üzerinde çalışan, Acısu United'ın mevcut Supabase projesine b
 
 ## Kullanım
 
+- **Diğer → Eski borç girişi:** Yönetici daireyi, borcun ait olduğu önceki tarihini, kalan tutarı ve özel açıklamasını girer. Aynı bölüm/ay için ikinci borç açılmaz; muaf bölümün eski borcu kaydedilebilir. Devir kaydı kasayı değiştirmez, tahsilat yapıldığında kasa artar. Her eski ay ayrı kaydedilir; zaten girilmiş borcu yeniden devretmeyin.
+- **Aidatlar → Ayrıntılar:** Daire hesabı; borçlandırma, ödeme ve hareket sonrası bakiye tarih sırasıyla gösterilir. Eski bir borca buradan ödeme alınabilir. Kopyalanan/indirilen döküm özel yönetici notlarını veya malik/oturan isimlerini içermez.
+- **Özet → Aylık hesap özeti:** Devreden kasa + ödeme tarihine göre o ayki tahsilat − o ayki gider = ay sonu kasa. Eski aya ait aidat bu ay ödenirse bu ayın tahsilatında sayılır. Ay sonu alacağı o aya kadar oluşan borçlar ve o aya kadar girilen ödemelerle hesaplanır; raporlar güncel kayıtlardan üretilir, kilitli muhasebe kapanışı değildir. Kayıtlı açılış kasa tutarı sistemin başlangıç bakiyesidir.
+- Aylık özet herkes tarafından görülebilir, metin olarak kopyalanabilir/indirilebilir. Otomatik WhatsApp gönderimi yapılmaz; kullanıcı kopyalanan metni kendisi paylaşır.
+
 - Ana menü: Özet, Aidatlar, Giderler, Diğer. Duyurular ile yöneticiye özel daire/ayar ekranları Diğer altında toplanır.
 - Özet ekranında kasa tüm dönemleri; toplanan ve kalan aidat kartları seçili aya ait tahakkukları gösterir. Ödeme bekleyenler listesi tüm dönemlerin borcunu kapsar.
 - Aidatlar telefona uygun daire kartlarıyla gösterilir. Önceki aylardan borçlar ayrı belirtilir; Ayrıntılar üzerinden eski bir aya ödeme girilebilir.
@@ -28,12 +33,14 @@ Tablolar: `apartman_admins`, `apartman_units`, `apartman_charges`, `apartman_pay
 
 Bu tabloların tamamında RLS açıktır; `anon` ve `authenticated` için doğrudan tablo/sequence erişimi kapalıdır. Bu nedenle güvenlik danışmanındaki **RLS Enabled No Policy** bilgi notları bu tasarımda bilinçlidir; herkese açık tablo politikası eklemeyin.
 
-API yalnızca iki SECURITY INVOKER fonksiyonundan geçer:
+API, public şemasındaki SECURITY INVOKER RPC fonksiyonlarından geçer:
 
 - `apartman_state()` ortak özeti; yetkili yönetici için ayrıca özel alanları döndürür.
 - `apartman_action(action,payload)` yalnızca apartman yöneticilerine işlem yaptırır.
+- `apartman_manage_charges(payload)` mevcut aidatları ödeme ve eşzamanlılık kontrolleriyle yönetir.
+- `apartman_opening_charge(payload)` yalnızca apartman yöneticisine eski borç girişi yaptırır.
 
-Ayrıcalıklı uygulama kodu Data API'ye açılmayan `apartman_private` şemasındadır. Yönetim işlemlerinde üyelik `auth.uid()` üzerinden kontrol edilir. Ortak ekranda malik/oturan isimleri, ödeme notları ve işlem geçmişi yoktur. Ortak ekran bağlantıyı bilen herkese açık olduğundan bölüm etiketleri ve ödeme durumları görülebilir.
+Ayrıcalıklı uygulama kodu Data API'ye açılmayan `apartman_private` şemasındadır. Yönetim işlemlerinde üyelik `auth.uid()` üzerinden kontrol edilir. Ortak ekranda malik/oturan isimleri, özel borç/ödeme notları ve yönetici işlem geçmişi yoktur. Hesap dökümü için ödeme tarihi, tutarı ve bağlı aidat kimliği ortak özette bulunur. Ortak ekran bağlantıyı bilen herkese açık olduğundan bölüm etiketleri ve ödeme durumları görülebilir.
 
 Tutarlar kuruş cinsinden tamsayıdır. Ödeme kontrolleri ve aylık borçlandırmalar bir veritabanı işlemi içinde kilitlemeyle yapılır; eşzamanlı istekler fazla ödeme veya çift aidat oluşturamaz. Oturum aynı sekmenin `sessionStorage` alanında apartmana özgü anahtarla tutulur; şifre kaydedilmez. Çıkış Supabase'in yalnızca mevcut oturumunu kapatır.
 
@@ -54,6 +61,8 @@ Python 3 ile http://localhost:3000 açılır. Üretim yayını herhangi bir Pyth
 ## Veritabanı kurulumu ve doğrulama
 
 `supabase/schema.sql` ilk kuruluma ait eklemeli şemadır; kurulu projede tekrar çalıştırmayın. Kurulum Supabase migration geçmişine kaydedilmiştir. Fonksiyon değişikliklerini yeni bir migration olarak uygulayın. `supabase/charge-management.sql` aidat düzenleme/silme yükseltmesidir; `supabase/verify-charge-management.sql` ilgili işlemleri ROLLBACK ile test eder.
+
+`supabase/account-statements.sql` eski borç ve hesap dökümü yükseltmesidir; `supabase/verify-account-statements.sql` borç, kasa ve yetki kontrollerini ROLLBACK ile doğrular.
 
 `supabase/verify.sql` bütün finansal test işlemlerini **ROLLBACK** ile geri alır. Test için Auth hesabı açmaz ve gerçek finansal kayıt bırakmaz. Kimlikler mevcut `apartman_admins` ve `acisu_admins` tablolarından seçilir.
 

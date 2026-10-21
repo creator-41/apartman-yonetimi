@@ -39,7 +39,7 @@ begin
  begin perform public.apartman_action('backup','{}'); exception when insufficient_privilege then failed:=true; end;
  if not failed then raise exception 'Club admin can export apartment records'; end if;
  s:=public.apartman_state();
- if s::text like '%TEST_PRIVATE%' or s ? 'audit' or s ? 'payments' then raise exception 'Private data leaked'; end if;
+ if s::text like '%TEST_PRIVATE%' or s ? 'audit' or exists(select 1 from jsonb_array_elements(s->'payments') payment_row where payment_row ? 'note' or payment_row ? 'created_at') then raise exception 'Private data leaked'; end if;
 end;
 $test$;
 set local role anon;

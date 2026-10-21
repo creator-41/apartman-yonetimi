@@ -54,6 +54,7 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
     if(path==='logout')return logout();
     if(path==='state')return rpc('apartman_state',{});
     if(path==='backup')return rpc('apartman_action',{action:'backup',payload:{}});
+    if(path==='charges/opening'&&method==='POST')return rpc('apartman_opening_charge',{payload:data});
     if(path==='charges/manage'&&method==='POST')return rpc('apartman_manage_charges',{payload:data});
     let action,payload={...data};
     if(path==='settings'&&method==='PUT')action='settings';
