@@ -1,12 +1,13 @@
-import { filterUnits } from './dues-filters.js?v=filters-1';
-import { changeInfo } from './history.js?v=filters-1';
-import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=filters-1';
-import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=filters-1';
-import { openTasks, taskSave, statusName } from './work.js?v=filters-1';
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=filters-1';
-import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=filters-1';
+import { initPwa } from './pwa.js?v=install-1';
+import { filterUnits } from './dues-filters.js?v=install-1';
+import { changeInfo } from './history.js?v=install-1';
+import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=install-1';
+import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=install-1';
+import { openTasks, taskSave, statusName } from './work.js?v=install-1';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=install-1';
+import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=install-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=filters-1';
+import { createApi } from './transport.js?v=install-1';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -280,6 +281,7 @@ document.addEventListener('click',async e=>{
   const next=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
   if(next>='2000-01'&&next<='2099-12'){selectedMonth=next;selectedCharges.clear();render();}
  }
+ else if(action==='install-app'){btn.disabled=true;try{await installApp();}finally{btn.disabled=false;}}
  else if(action==='clear-dues-filter'){unitQuery='';duesFilter='all';selectedCharges.clear();render();$('#unitSearch').focus();}
  else if(action==='toggle-bulk'){bulkMode=!bulkMode;selectedCharges.clear();render();}
  else if(action==='receipt'){await refresh();showReceipt(id);}
@@ -396,6 +398,10 @@ document.addEventListener('click',async e=>{
  }
  }catch(err){error(err);btn.disabled=false;}
 });
+const installApp=initPwa({showStatus:toast,showGuide:kind=>{
+ const instructions=kind==='ios'?'<ol><li>Bu siteyi Safari’de aç.</li><li>Paylaş menüsünden <strong>Ana Ekrana Ekle</strong> seç.</li><li>Varsa <strong>Web Uygulaması Olarak Aç</strong> seçeneğini açıp <strong>Ekle</strong> düğmesine dokun.</li></ol>':kind==='android'?'<ol><li>Bu siteyi Chrome’da aç.</li><li>Sağ üstteki üç nokta menüsünden <strong>Uygulamayı yükle</strong> veya <strong>Ana ekrana ekle</strong> seç.</li><li>Yüklemeyi onayla.</li></ol>':'<p>Chrome veya Edge’in adres çubuğundaki yükleme simgesini ya da tarayıcı menüsündeki <strong>Uygulamayı yükle</strong> seçeneğini kullanabilirsin.</p><p>Telefonunda bu siteyi açarak aynı şekilde ana ekrana ekleyebilirsin.</p>';
+ openReadDialog('Komşu’yu ana ekrana ekle',instructions);
+}});
 refresh().catch(error);
 setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&!$('#settingsForm')&&!$('#bankForm'))refresh().catch(error);},60000);
 

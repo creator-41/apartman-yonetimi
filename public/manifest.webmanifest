@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "Komşu · Apartman Yönetimi",
+  "short_name": "Komşu",
+  "description": "Apartmanın aidatlarını, giderlerini ve kararlarını takip et.",
+  "lang": "tr",
+  "start_url": "./?source=app",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f8f3",
+  "theme_color": "#154d43",
+  "icons": [
+    {"src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
