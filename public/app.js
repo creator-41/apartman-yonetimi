@@ -1,10 +1,11 @@
-import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=balance-1';
-import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=balance-1';
-import { openTasks, taskSave, statusName } from './work.js?v=balance-1';
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=balance-1';
-import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=balance-1';
+import { changeInfo } from './history.js?v=undo-1';
+import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=undo-1';
+import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=undo-1';
+import { openTasks, taskSave, statusName } from './work.js?v=undo-1';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=undo-1';
+import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=undo-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=balance-1';
+import { createApi } from './transport.js?v=undo-1';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -17,6 +18,7 @@ let documentTarget=null;
 let workFilter="open";let decisionArchive=false;
 let uploadingDocument=false;
 let createdPaymentId=null;
+let changeHistory=[],historyError="";
 'use strict';
 let state,tab='overview',selectedMonth=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit'}).format(new Date()),dialogAction;
 const $=s=>document.querySelector(s);
@@ -28,10 +30,13 @@ const dateName=v=>new Date(v.slice(0,10)+'T12:00:00').toLocaleDateString('tr-TR'
 const unitName=id=>state.units.find(u=>u.id===id)?.label||'Bölüm';
 const noticeHTML=n=>'<article class="notice"><h3>'+esc(n.title)+'</h3><p>'+esc(n.body)+'</p><small>'+dateName(n.created_at)+'</small>'+(state.admin?' <button class="small danger" data-action="delete-notice" data-id="'+n.id+'">Kaldır</button>':'')+'</article>';
 async function refresh(){
- state=await api('state');$('#building').textContent=state.settings.name;document.title=state.settings.name+' · Komşu';
+ state=await api('state');
+ if(!state.admin){changeHistory=[];if(tab==='history')tab='overview';}
+ else if(tab==='history'){try{changeHistory=await api('history');historyError='';}catch(e){changeHistory=[];historyError=e.message;}}
+ $('#building').textContent=state.settings.name;document.title=state.settings.name+' · Komşu';
  $('#mode').textContent=state.admin?'Yönetici paneli':'Ortak takip ekranı';$('#auth').textContent=state.admin?'Çıkış yap':'Yönetici girişi';
  document.querySelectorAll('.admin-only').forEach(e=>e.hidden=!state.admin);
- if(!state.admin&&['units','settings'].includes(tab))tab='overview';
+ if(!state.admin&&['units','settings','history'].includes(tab))tab='overview';
  $('#error').hidden=true;render();
 }
 function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').hidden=true,4500);}
@@ -67,9 +72,22 @@ function showReceipt(id){
  const receipt=paymentReceipt(state,id),link=receiptLink(location.href,id);
  openReadDialog(receipt.number+' · Ödeme makbuzu','<div class="receipt-preview">'+receiptSvg(receipt,link)+'</div><div class="actions report-actions"><button type="button" class="primary" data-action="download-receipt" data-id="'+id+'">Makbuzu indir (PNG)</button><button type="button" class="outline" data-action="copy-receipt-link" data-id="'+id+'">Bağlantıyı kopyala</button><a class="outline" href="'+esc(link)+'" target="_blank" rel="noopener noreferrer">Aç / Yazdır / PDF</a></div>');
 }
-function moreLinks(){return '<div class="more-grid">'+[['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular, tarihler ve durumlar'],['report','Aylık bilanço','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','IBAN, ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
+const timeName=value=>new Date(value).toLocaleString('tr-TR',{timeZone:'Europe/Istanbul',dateStyle:'short',timeStyle:'short'});
+const signedMoney=value=>(value>0?'+':'')+money(value);
+function changeSummary(entry){
+ const {row}=changeInfo(entry),charge=state.charges.find(c=>c.id===row.charge_id);
+ const label=entry.entity==='payment'?(charge?unitName(charge.unit_id)+' · '+monthName(charge.period):'Aidat #'+row.charge_id):row.description;
+ return '<p><strong>'+esc(label)+'</strong> · '+dateName(row.date)+'</p><p>'+ (entry.operation==='UPDATE'?money(entry.before_row.amount)+' → ':'')+money(row.amount)+'</p>';
+}
+function historyHTML(){
+ return '<section class="panel"><div class="toolbar"><h2>İşlem geçmişi</h2><button class="outline" data-action="refresh-history">Yenile</button></div><p class="help">Yeni ödeme ve gider işlemlerinin son 100 kaydı. Aynı kayıtta birden fazla değişiklik varsa en son işlemden başlayın.</p>'+(historyError?'<p role="alert">'+esc(historyError)+'</p>':'')+(changeHistory.map(entry=>{
+  const info=changeInfo(entry);
+  return '<article class="change-item"><div class="toolbar"><h3>'+esc(info.title)+'</h3>'+(info.canUndo?'<button class="outline small" data-action="undo-change" data-id="'+entry.id+'">Geri al</button>':'<span class="badge">'+(entry.undone_at?'Geri alındı':'Geri alma kaydı')+'</span>')+'</div>'+changeSummary(entry)+'<small>'+esc(timeName(entry.created_at))+' · '+esc(entry.actor_label)+'</small>'+(entry.undone_at?'<p class="help">Geri alan: '+esc(entry.undone_label)+' · '+esc(timeName(entry.undone_at))+'</p>':'')+'</article>';
+ }).join('')||'<p class="empty">Yeni ödeme ve gider işlemleri burada görünecek.</p>')+'<details class="secondary-section"><summary>Diğer işlem kayıtları</summary>'+table(['Tarih','İşlem','Yönetici'],(state.audit||[]).map(a=>'<tr><td>'+esc(timeName(a.created_at))+'</td><td>'+esc(a.action)+'</td><td>'+esc(a.actor?'Yönetici '+a.actor.slice(0,8):'Yönetici')+'</td></tr>'))+'</details></section>';
+}
+function moreLinks(){return '<div class="more-grid">'+[['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular, tarihler ve durumlar'],['report','Aylık bilanço','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','IBAN, ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
 function render(){
- document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news'].includes(tab))));
+ document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news','history'].includes(tab))));
  const view=$('#view'),charges=state.charges.filter(c=>c.period===selectedMonth),expenses=state.expenses.filter(e=>e.date.startsWith(selectedMonth));
  if(tab==='overview'){
   const expected=charges.reduce((s,c)=>s+c.amount,0),paid=charges.reduce((s,c)=>s+c.paid,0),paidCount=charges.filter(c=>c.paid>=c.amount).length;
@@ -99,8 +117,10 @@ function render(){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Duyuru panosu</h2>'+(state.admin?'<button class="primary" data-action="notice">Duyuru ekle</button>':'')+'</div>'+(state.notices.map(noticeHTML).join('')||'<div class="empty">İlk duyuru burada görünecek.</div>')+'</section>';
  }else if(tab==='units'&&state.admin){
   view.innerHTML='<div class="note">“Aidattan muaf tut” açık olan bölümlere yeni aylık aidat yazılmaz. Önceki borçlar ve ödemeler korunur.</div><div class="unit-grid">'+state.units.map(u=>'<article class="unit-card"><div class="unit-top"><h3>'+esc(u.label)+'</h3>'+(u.exempt?'<span class="badge">Yönetim kararı ile muaf</span>':'')+'</div><p>Malik: '+esc(u.owner||'Belirtilmedi')+'<br>Oturan: '+esc(u.resident||'Belirtilmedi')+'</p><p>Toplam alacak: <strong>'+money(state.charges.filter(c=>c.unit_id===u.id).reduce((s,c)=>s+c.amount-c.paid,0))+'</strong></p><button class="outline small" data-action="unit" data-id="'+u.id+'">Düzenle / Muafiyet</button></article>').join('')+'</div>';
+ }else if(tab==='history'&&state.admin){
+  view.innerHTML=historyHTML();
  }else if(tab==='settings'&&state.admin){
-  view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><button class="outline" data-action="backup">JSON kayıt yedeği indir</button><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek, kayıtları ve belge listesini içerir; yüklenen dosyalar ayrıca saklanır. Malik/oturan bilgileri de bulunduğu için güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
+  view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><button class="primary" data-tab="history">İşlem geçmişi / Geri al</button><button class="outline" data-action="backup">JSON kayıt yedeği indir</button><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek, kayıtları ve belge listesini içerir; yüklenen dosyalar ayrıca saklanır. Malik/oturan bilgileri de bulunduğu için güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
  }
  if(tab==='settings'&&state.admin)view.innerHTML=bankForm()+view.innerHTML;
  if(tab==='overview'){
@@ -233,7 +253,7 @@ document.addEventListener('submit',async e=>{
  try{const f=new FormData(e.target);await api('settings','PUT',{name:f.get('name'),monthlyDues:Number(f.get('monthlyDues')),openingBalance:Number(f.get('openingBalance'))});await refresh();toast('Ayarlar kaydedildi.');}catch(err){error(err);}finally{button.disabled=false;}
 });
 document.addEventListener('click',async e=>{
- const nav=e.target.closest('[data-tab]');if(nav){tab=nav.dataset.tab;render();return;}
+ const nav=e.target.closest('[data-tab]');if(nav){tab=nav.dataset.tab;if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
  const btn=e.target.closest('[data-action]');if(!btn)return;
  e.preventDefault();
  const action=btn.dataset.action,id=Number(btn.dataset.id);
@@ -288,6 +308,12 @@ document.addEventListener('click',async e=>{
  else if(action==='show-notices'){tab='notices';render();}
  else if(action==='edit-charge'||action==='remove-charge')manageCharges(action==='edit-charge'?'edit':'delete',[id]);
  else if(action==='edit-selected-charges'||action==='remove-selected-charges')manageCharges(action==='edit-selected-charges'?'edit':'delete',[...selectedCharges]);
+ else if(action==='undo-change'){
+  if(!state.admin)throw new Error('Yönetici girişi gerekli.');const entry=changeHistory.find(x=>Number(x.id)===id);if(!entry)throw new Error('İşlem bulunamadı. Listeyi yenileyin.');
+  const info=changeInfo(entry);if(!info.canUndo)throw new Error('Bu işlem geri alınamaz.');
+  openDialog('İşlemi geri al',changeSummary(entry)+'<div class="note"><p>Kasa değişimi: <strong>'+signedMoney(info.cashChange)+'</strong></p>'+(entry.entity==='payment'?'<p>Aidat borcu değişimi: <strong>'+signedMoney(info.debtChange)+'</strong></p>':'')+'</div><p>Bu işlem geri alınsın mı?</p>',async()=>{await api('undo','POST',{id:entry.id});toast('İşlem geri alındı. Kasa ve borçlar güncellendi.');},'Geri al');
+ }
+ else if(action==='refresh-history'){await refresh();}
  else if(action==='print'||action==='print-balance')window.print();
  else if(action==='backup'){
   btn.disabled=true;
