@@ -99,3 +99,9 @@ Karar belgeleri mevcut özel belge deposunu kullanır; önce yalnızca yönetici
 Yönetim → Aidat ödeme hesabı alanına Türkiye IBAN ve hesap sahibi girilir. Biçim ve mod-97 kontrolü hem tarayıcıda hem sunucuda yapılır; bu kontrol hesabın varlığını veya sahibini doğrulamaz. Hesap bilgileri ortak Aidatlar ekranında görünür, IBAN boşaltılarak kaldırılır. Ayrı banka ayarı işlemi, aidat ve kasa ayarlarını değiştirmez; eşzamanlı değişiklikler beklenen eski değerlerle korunur.
 
 Yönetici Aidatlar → Hatırlatma hazırla ile daireye ait tüm kalan borçları içeren metni görüp düzenleyebilir ve kopyalayabilir. Tam ödenmiş dönemler atlanır; kısmi ödemeler düşülür. WhatsApp'a gönderme kullanıcı tarafından yapılır. Malik/oturan isimleri ve özel notlar metne alınmaz. `supabase/payment-tools.sql` yükseltmeyi, `verify-payment-tools.sql` ROLLBACK doğrulamasını içerir.
+
+## Ödeme makbuzları
+
+Ödeme kaydedilince makbuz önizlemesi açılır. Aidatlar → Ödeme kayıtları → Makbuz ve daire hesap dökümündeki ödeme satırından eski makbuzlar da açılır. Numara ödeme kimliğinden kalıcı olarak `KM-000001` biçiminde üretilir; yeniden açmak yeni ödeme oluşturmaz. Tutar yalnızca o tahsilata aittir, ödeme tarihi ile aidat dönemi ayrı gösterilir. Malik/oturan ve özel notlar belgeye alınmaz.
+
+Makbuz PNG olarak indirilir; bağlantıdaki sayfa üzerinden yazdırma/PDF kaydetme de kullanılabilir. İndirilmiş görüntü sonradan değişmez. Güncel durum belgedeki bağlantıdan kontrol edilir: sayfa ve yeni indirmeler mevcut ödeme kaydını sorgular; silinmiş/iptal edilmiş veya bulunamayan kayıt için makbuz gösterilmez. Bu ekranlar mevcut ortak ödeme verisini kullanır. Hiçbir tahsilat/silme işlemi makbuz görüntüleme nedeniyle tetiklenmez.
