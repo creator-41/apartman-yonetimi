@@ -4,6 +4,12 @@ GitHub Pages üzerinde çalışan, Acısu United'ın mevcut Supabase projesine b
 
 ## Kullanım
 
+- Ana menü: Özet, Aidatlar, Giderler, Diğer. Duyurular ile yöneticiye özel daire/ayar ekranları Diğer altında toplanır.
+- Özet ekranında kasa tüm dönemleri; toplanan ve kalan aidat kartları seçili aya ait tahakkukları gösterir. Ödeme bekleyenler listesi tüm dönemlerin borcunu kapsar.
+- Aidatlar telefona uygun daire kartlarıyla gösterilir. Önceki aylardan borçlar ayrı belirtilir; Ayrıntılar üzerinden eski bir aya ödeme girilebilir.
+- Ödeme al ekranında kalan tutar ve bugünün tarihi hazır gelir. Tarih ve not isteğe bağlı açılır.
+- Düzenle/sil seçenekleri kartın işlem menüsünde, seçim kutuları ise Toplu işlem modu açıldığında görünür. Ödemeli aidatları koruyan kurallar değişmez.
+
 - Ortak takip ekranında aidatlar, giderler, kasa ve duyurular görüntülenir.
 - Yönetici girişi Supabase Auth e-posta/şifre ile yapılır. Kayıt olma akışı yoktur.
 - Apartman yetkisi `apartman_admins` tablosundan kontrol edilir. Acısu yöneticisi olmak tek başına apartman yetkisi vermez.
@@ -13,7 +19,7 @@ GitHub Pages üzerinde çalışan, Acısu United'ın mevcut Supabase projesine b
 - Aidatlar ekranında kutucuklardan ödeme girilmemiş kayıtları seçip **Toplu düzenle** ile ay/tutar değiştirilebilir; **Toplu sil** ile kaldırılabilir. Her satırda tekil Düzenle / Sil seçenekleri de vardır. Silmede etkilenen toplam gösterilir ve SİL yazılması istenir.
 - Ödeme girilmiş aidatların seçimi ve düzenleme/silme işlemi kapalıdır. Yanlış bir ödeme onayı varsa önce ilgili ödeme kaydı iptal edilmelidir; gerçek tahsilatlar sırf aidatı düzenlemek için iptal edilmemelidir. Eski kayıtlar işlem geçmişinde saklanır.
 - Tam/kısmi ödeme onayı, ödeme iptali, yönetim gideri dahil ortak giderler, duyurular, CSV ve JSON yedeği vardır.
-- Genel bakış üst kartları tüm dönemleri; aylık aidat/gider tabloları seçili ayı kapsar.
+- Özet ekranındaki kasa tüm dönemleri; aylık aidat/gider listeleri seçili ayı kapsar.
 - Açılış kasa bakiyesi negatif olamaz. Aidat değişikliği geçmiş tahakkukları yeniden hesaplamaz.
 
 ## Veriler ve yetkiler
