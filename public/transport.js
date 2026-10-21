@@ -80,6 +80,7 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       throw new Error('Geçersiz belge işlemi.');
     }
     if(path==='expenses/manage'&&method==='POST')return rpc('apartman_expense_manage',{payload:data});
+    if(path==='bank'&&method==='PUT')return rpc('apartman_bank_save',{payload:data});
     if(path==='state')return rpc('apartman_state',{});
     if(path==='backup')return rpc('apartman_backup',{});
     if(['decisions/manage','tasks/manage'].includes(path)&&method==='POST')return rpc('apartman_work_manage',{kind:path==='decisions/manage'?'decision':'task',payload:data});

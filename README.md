@@ -93,3 +93,9 @@ Yönetim → JSON yedeği indir ile kayıtlar dışa aktarılabilir. Dosya malik
 Diğer → Kararlar / Yapılacak işler üzerinden tüm kullanıcılar kayıtları görebilir. Yönetici; karar tarihi, numarası, metni ve imzalı sayfanın fotoğraf/PDF kopyasını ekleyebilir. İşlere sorumlu, hedef tarih, durum ve ilgili karar atanır. Ana ekran açık işleri hedef tarihine göre gösterir; gecikenler işaretlenir. Tamamlanan işler ayrıca filtrelenir. Kayıtlar arşivlenip geri alınabilir. Eşzamanlı düzenlemeler sürüm kontrolüyle korunur.
 
 Karar belgeleri mevcut özel belge deposunu kullanır; önce yalnızca yönetici görür, ortak ekranda gösterme ayrıca seçilir. Dijital belge fiziksel imzalı kararın kopyasıdır. JSON yedeğine karar ve iş kayıtları ile belge metadata listesi dahildir; dosya içerikleri dahil değildir. `supabase/decisions-tasks.sql` eklemeli yükseltmedir; `verify-decisions-tasks.sql` kayıt, durum, arşiv, sürüm, kasa ve yetkileri ROLLBACK ile doğrular.
+
+## Ödeme hesabı ve hatırlatma
+
+Yönetim → Aidat ödeme hesabı alanına Türkiye IBAN ve hesap sahibi girilir. Biçim ve mod-97 kontrolü hem tarayıcıda hem sunucuda yapılır; bu kontrol hesabın varlığını veya sahibini doğrulamaz. Hesap bilgileri ortak Aidatlar ekranında görünür, IBAN boşaltılarak kaldırılır. Ayrı banka ayarı işlemi, aidat ve kasa ayarlarını değiştirmez; eşzamanlı değişiklikler beklenen eski değerlerle korunur.
+
+Yönetici Aidatlar → Hatırlatma hazırla ile daireye ait tüm kalan borçları içeren metni görüp düzenleyebilir ve kopyalayabilir. Tam ödenmiş dönemler atlanır; kısmi ödemeler düşülür. WhatsApp'a gönderme kullanıcı tarafından yapılır. Malik/oturan isimleri ve özel notlar metne alınmaz. `supabase/payment-tools.sql` yükseltmeyi, `verify-payment-tools.sql` ROLLBACK doğrulamasını içerir.
