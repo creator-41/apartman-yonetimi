@@ -105,3 +105,9 @@ Yönetici Aidatlar → Hatırlatma hazırla ile daireye ait tüm kalan borçlar�
 Ödeme kaydedilince makbuz önizlemesi açılır. Aidatlar → Ödeme kayıtları → Makbuz ve daire hesap dökümündeki ödeme satırından eski makbuzlar da açılır. Numara ödeme kimliğinden kalıcı olarak `KM-000001` biçiminde üretilir; yeniden açmak yeni ödeme oluşturmaz. Tutar yalnızca o tahsilata aittir, ödeme tarihi ile aidat dönemi ayrı gösterilir. Malik/oturan ve özel notlar belgeye alınmaz.
 
 Makbuz PNG olarak indirilir; bağlantıdaki sayfa üzerinden yazdırma/PDF kaydetme de kullanılabilir. İndirilmiş görüntü sonradan değişmez. Güncel durum belgedeki bağlantıdan kontrol edilir: sayfa ve yeni indirmeler mevcut ödeme kaydını sorgular; silinmiş/iptal edilmiş veya bulunamayan kayıt için makbuz gösterilmez. Bu ekranlar mevcut ortak ödeme verisini kullanır. Hiçbir tahsilat/silme işlemi makbuz görüntüleme nedeniyle tetiklenmez.
+
+## Aylık bilanço
+
+Özet ekranındaki Aylık bilanço düğmesi, seçilen ayın devreden kasasını, tahsilatını, harcamasını, gelir-gider farkını, ay sonu kasasını ve kalan alacağını tek raporda açar. Tahsilat satırları gerçek ödeme tarihine, harcamalar gider tarihine göredir. Kategori özeti ve harcama açıklamaları dahildir. Borçlu dairelerde o ayın kalan aidatı ile önceki dönem borcu ayrılır; kısmi ödeme, ödemedi ve yalnızca önceki dönem borcu durumları belirtilir. Sonraki aylarda yapılan ödemeler geçmiş ay sonundaki borcu kapatmış göstermez. Tamamı ödenen daireler borç listesine alınmaz.
+
+Metni kopyala / Metin indir seçenekleri tüm raporu içerir. Yazdır / PDF kaydet seçeneği rapora uygun sayfa düzenini kullanır. Borçlar ve bakiyeler mevcut kayıtlardan hesaplanır; rapor oluşturmak finansal kayıt değiştirmez. Malik/oturan ve özel ödeme notları rapora eklenmez.

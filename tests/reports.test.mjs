@@ -39,3 +39,15 @@ test('Opening debt transport uses its dedicated authenticated RPC',async()=>{
  const payload={unitId:1,date:'2026-09-30',amount:350,note:'Eski aidat'};await api('charges/opening','POST',payload);
  assert.equal(sent.url,'https://test/rest/v1/rpc/apartman_opening_charge');assert.deepEqual(sent.body,{payload});
 });
+test('Detailed monthly balance reconciles collections, spending, net cash and debtor totals',()=>{
+ const r=monthReport(state,'2026-10');assert.equal(r.net,15000);assert.equal(r.collections.reduce((s,p)=>s+p.amount,0),r.income);assert.equal(r.spending.reduce((s,e)=>s+e.amount,0),r.spent);assert.equal(r.debtors.reduce((s,u)=>s+u.total,0),r.receivable);
+ assert.deepEqual(r.debtors,[{unitId:1,label:'Daire 1',monthlyDue:30000,monthlyPaid:0,currentRemaining:30000,olderRemaining:20000,total:50000,status:'Ödemedi'}]);assert.equal(r.collections[0].period,'2026-08');assert.equal(r.collections[0].unit,'Daire 1');assert.doesNotMatch(JSON.stringify([r.debtors,r.collections,r.spending]),/PRIVATE/);
+});
+test('Partially paid and fully paid dues differ at selected month-end, ignoring later settlement',()=>{
+ const s={...state,charges:[{id:10,unit_id:1,period:'2026-10',amount:50000,paid:50000},{id:11,unit_id:2,period:'2026-10',amount:50000,paid:50000}],payments:[{id:10,charge_id:10,date:'2026-10-03',amount:20000},{id:11,charge_id:10,date:'2026-11-03',amount:30000},{id:12,charge_id:11,date:'2026-10-05',amount:50000}]};
+ const r=monthReport(s,'2026-10');assert.equal(r.debtors.length,1);assert.equal(r.debtors[0].label,'Daire 1');assert.equal(r.debtors[0].status,'Kısmi ödeme');assert.equal(r.debtors[0].currentRemaining,30000);assert.equal(r.income,70000);assert.equal(monthReport(s,'2026-11').debtors.length,0);
+ const text=monthReportText(s,'2026-10');assert.match(text,/TAHSİLATLAR/);assert.match(text,/HARCAMA ÖZETİ/);assert.match(text,/AİDAT BORCU KALAN DAİRELER/);assert.match(text,/Kısmi ödeme/);
+});
+test('Old-debt-only units remain visible without being labelled unpaid for a month with no charge',()=>{
+ const r=monthReport({...state,charges:[state.charges[0]],payments:[]},'2026-10');assert.equal(r.debtors[0].currentRemaining,0);assert.equal(r.debtors[0].olderRemaining,50000);assert.equal(r.debtors[0].status,'Önceki dönem borcu');
+});
