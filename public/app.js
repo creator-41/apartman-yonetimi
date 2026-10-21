@@ -1,13 +1,13 @@
-import { initPwa } from './pwa.js?v=install-1';
-import { filterUnits } from './dues-filters.js?v=install-1';
-import { changeInfo } from './history.js?v=install-1';
-import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=install-1';
-import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=install-1';
-import { openTasks, taskSave, statusName } from './work.js?v=install-1';
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=install-1';
-import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=install-1';
+import { initPwa } from './pwa.js?v=simple-1';
+import { filterUnits } from './dues-filters.js?v=simple-1';
+import { changeInfo } from './history.js?v=simple-1';
+import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=simple-1';
+import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=simple-1';
+import { openTasks, taskSave, statusName } from './work.js?v=simple-1';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=simple-1';
+import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=simple-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=install-1';
+import { createApi } from './transport.js?v=simple-1';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -47,17 +47,22 @@ function error(e){$('#error').textContent=e.message;$('#error').hidden=false;}
 function table(headers,rows,empty='Henüz kayıt yok.'){return rows.length?'<div class="table-wrap"><table><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>':'<div class="empty">'+empty+'</div>';}
 function monthFilter(){return '<div class="month-picker"><button class="outline month-arrow" data-action="previous-month" aria-label="Önceki ay" '+(selectedMonth==='2000-01'?'disabled':'')+'>‹</button><label class="month-label" for="monthFilter"><span>'+esc(monthName(selectedMonth))+'</span><input aria-label="Ay seçin" id="monthFilter" type="month" min="2000-01" max="2099-12" value="'+selectedMonth+'"></label><button class="outline month-arrow" data-action="next-month" aria-label="Sonraki ay" '+(selectedMonth==='2099-12'?'disabled':'')+'>›</button></div>';}
 function cards(){
- const charges=state.charges.filter(c=>c.period===selectedMonth);
- return '<div class="cards">'+[['KASA',state.totals.cash,'Tüm dönemler · Güncel bakiye','featured'],['BU AY TOPLANAN',charges.reduce((s,c)=>s+c.paid,0),monthName(selectedMonth)+' aidatlarına yapılan ödemeler',''],['BU AY KALAN',charges.reduce((s,c)=>s+c.amount-c.paid,0),monthName(selectedMonth)+' aidatlarından kalan',''],['ÖNCEKİ AYLARDAN KALAN',state.charges.filter(c=>c.period<selectedMonth).reduce((sum,c)=>sum+c.amount-c.paid,0),monthName(selectedMonth)+' öncesindeki aidatlardan kalan','arrears']].map(([title,value,help,cls])=>'<div class="card '+cls+'"><div class="label">'+title+'</div><div class="number">'+money(value)+'</div><small>'+esc(help)+'</small></div>').join('')+'</div>';
+ const report=monthReport(state,selectedMonth);
+ const old=state.charges.filter(c=>c.period<selectedMonth).reduce((sum,c)=>sum+c.amount-c.paid,0);
+ return '<div class="cards summary-cards">'+[['Kasa',state.totals.cash,'Güncel bakiye','featured'],['Kalan aidat',state.totals.receivable,'Tüm dönemler',''],['Bu ay tahsilat',report.income,monthName(selectedMonth),''],['Önceki aylardan kalan',old,'Seçili ay öncesi','arrears']].map(([title,value,help,cls])=>'<div class="card '+cls+'"><div class="label">'+title+'</div><div class="number">'+money(value)+'</div><small>'+esc(help)+'</small></div>').join('')+'</div>';
 }
 function earlierDebt(unitId){return state.charges.filter(c=>c.unit_id===unitId&&c.period<selectedMonth).reduce((sum,c)=>sum+c.amount-c.paid,0);}
 function chargeMenu(c){return '<details class="row-menu"><summary aria-label="Aidat işlemleri">⋯</summary><div class="row-menu-items"><button class="small outline" data-action="edit-charge" data-id="'+c.id+'" '+(c.paid>0?'disabled':'')+'>Düzenle</button><button class="small danger" data-action="remove-charge" data-id="'+c.id+'" '+(c.paid>0?'disabled':'')+'>Sil</button>'+(c.paid>0?'<small>Ödeme kaydı olan aidat korunur.</small>':'')+'</div></details>';}
-function newsHTML(limit=Infinity){
+function newsHTML(limit=Infinity,compact=false){
  const groups=[
   ['Duyurular','notices',state.notices,noticeHTML],
   ['Alınan kararlar','decisions',(state.decisions||[]).filter(d=>!d.archived),d=>'<article class="notice"><button class="news-title" data-action="decision-detail" data-id="'+d.id+'">'+esc(d.title)+' <span aria-hidden="true">›</span></button><p class="news-preview">'+esc(d.body)+'</p><small>'+dateName(d.date)+(d.decision_no?' · Karar no: '+esc(d.decision_no):'')+'</small></article>'],
   ['Verilen görevler','tasks',[...(state.tasks||[])].filter(t=>!t.archived).sort((a,b)=>b.id-a.id),t=>'<article class="notice"><button class="news-title" data-action="task-detail" data-id="'+t.id+'">'+esc(t.title)+' <span aria-hidden="true">›</span></button><p>'+esc(t.assignee||'Sorumlu belirtilmedi')+' · <span class="badge">'+esc(statusName(t.status))+'</span></p>'+(t.due_date?'<small class="'+(t.status!=='done'&&t.due_date<today()?'overdue':'')+'">Hedef: '+dateName(t.due_date)+'</small>':'')+'</article>']
  ];
+ if(compact){
+  const active=groups.filter(([, ,rows])=>rows.length);
+  return active.map(([title,target,rows,html])=>'<section class="news-group"><h3>'+title+'</h3>'+rows.slice(0,limit).map(row=>target==='notices'?'<article class="notice"><button class="news-title" data-tab="notices">'+esc(row.title)+' <span aria-hidden="true">›</span></button><p class="news-preview">'+esc(row.body)+'</p></article>':html(row)).join('')+'</section>').join('')||'<p class="muted">Henüz haber yok.</p>';
+ }
  return groups.map(([title,target,rows,html])=>'<section class="news-group"><div class="toolbar"><h3>'+title+'</h3><button class="small outline" data-tab="'+target+'">'+(rows.length>limit?'Tümü ('+rows.length+')':'Aç')+'</button></div>'+(rows.slice(0,limit).map(html).join('')||'<p class="muted">Henüz kayıt yok.</p>')+'</section>').join('');
 }
 function bankHTML(){
@@ -100,14 +105,22 @@ function updateUnitSearch(e){
  const search=$('#unitSearch');search.focus();if(position!==null)search.setSelectionRange(position,position);
 }
 document.addEventListener('compositionend',e=>{if(e.target.id==='unitSearch')updateUnitSearch(e);});
-function moreLinks(){return '<div class="more-grid">'+[['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular, tarihler ve durumlar'],['report','Aylık bilanço','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','IBAN, ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
+function moreLinks(){
+ const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
+ return '<section class="more-section"><h2>Bilgiler</h2>'+links([['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
+}
+function pendingUnits(){return state.units.map(u=>({u,total:state.charges.filter(c=>c.unit_id===u.id).reduce((sum,c)=>sum+c.amount-c.paid,0)})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total||a.u.id-b.u.id);}
+function pendingRows(rows){return rows.map(({u,total})=>'<button class="pending-row" data-action="unit-detail" data-id="'+u.id+'"><strong>'+esc(u.label)+'</strong><span>'+money(total)+' <span aria-hidden="true">›</span></span></button>').join('');}
+function overviewHTML(){
+ const charges=state.charges.filter(c=>c.period===selectedMonth),expected=charges.reduce((sum,c)=>sum+c.amount,0),paid=charges.reduce((sum,c)=>sum+c.paid,0),paidCount=charges.filter(c=>c.paid>=c.amount).length;
+ const pending=pendingUnits(),tasks=openTasks(state.tasks||[],today());
+ return '<div class="toolbar overview-toolbar"><h2>Apartman özeti</h2>'+monthFilter()+'</div>'+cards()+'<div class="overview-actions">'+(state.admin?'<button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button>':'')+'<button class="outline" data-tab="report">Aylık bilanço</button></div><section class="panel dues-summary"><div class="toolbar"><h3>Bu ayın aidatları</h3><span class="muted">'+paidCount+' / '+charges.length+' bölüm ödedi</span></div><progress max="'+(expected||1)+'" value="'+paid+'" aria-label="Aidat tahsilat oranı"></progress><div class="dues-summary-values"><span>Beklenen <strong>'+money(expected)+'</strong></span><span>Kalan <strong>'+money(expected-paid)+'</strong></span></div>'+(!charges.length?'<p class="help">Bu ay aidat oluşturulmamış.</p>':'')+'</section><div class="overview-columns"><section class="panel"><div class="toolbar"><h2>Ödeme bekleyenler</h2>'+(pending.length>3?'<button class="small outline" data-action="show-pending">Tümü ('+pending.length+')</button>':'')+'</div>'+pendingRows(pending.slice(0,3))+(pending.length?'':'<p class="muted">Bekleyen aidat borcu yok.</p>')+'</section><section class="panel compact-news"><div class="toolbar"><h2>Apartmandan haberler</h2><button class="small outline" data-tab="news">Tümü</button></div>'+newsHTML(1,true)+'</section></div>'+(tasks.length?'<section class="panel summary-tasks"><div class="toolbar"><h2>Yapılacak işler</h2><button class="small outline" data-tab="tasks">Tümü ('+tasks.length+')</button></div>'+tasks.slice(0,3).map(taskRow).join('')+'</section>':'');
+}
 function render(){
  document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news','history'].includes(tab))));
  const view=$('#view'),charges=state.charges.filter(c=>c.period===selectedMonth),expenses=state.expenses.filter(e=>e.date.startsWith(selectedMonth));
  if(tab==='overview'){
-  const expected=charges.reduce((s,c)=>s+c.amount,0),paid=charges.reduce((s,c)=>s+c.paid,0),paidCount=charges.filter(c=>c.paid>=c.amount).length;
-  const categories=state.categories.map(category=>({category,total:expenses.filter(e=>e.category===category).reduce((s,e)=>s+e.amount,0)})).filter(c=>c.total);
-  view.innerHTML='<div class="toolbar"><h2>Apartman özeti</h2><div class="actions"><button class="outline" data-tab="report">Aylık bilanço</button>'+monthFilter()+'</div></div>'+cards()+(state.admin?'<div class="quick-actions"><button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button></div>':'')+'<div class="columns"><section class="panel"><div class="toolbar"><h2>Aylık aidat durumu</h2>'+'</div><p class="muted">'+esc(monthName(selectedMonth))+' · '+paidCount+' / '+charges.length+' bölüm ödedi</p><progress max="'+(expected||1)+'" value="'+paid+'" aria-label="Aidat tahsilat oranı"></progress><div class="bar-row"><span>Tahsil edilen</span><strong>'+money(paid)+'</strong></div><div class="bar-row"><span>Beklenen</span><strong>'+money(expected)+'</strong></div><div class="bar-row"><span>Kalan alacak</span><strong>'+money(expected-paid)+'</strong></div>'+(!charges.length?'<p class="empty">Bu ay için aidat oluşturulmamış.</p>':'')+'<h3 class="section-title">Bu ayın gider dağılımı</h3>'+ (categories.map(c=>'<div class="bar-row"><span>'+esc(c.category)+'</span><strong>'+money(c.total)+'</strong></div>').join('')||'<p class="muted">Bu ay gider kaydı yok.</p>')+'</section><section class="panel"><div class="toolbar"><h2>Apartmandan haberler</h2><button class="small outline" data-tab="news">Tümü</button></div>'+newsHTML(2)+'</section></div>';
+  view.innerHTML=overviewHTML();
  }else if(tab==='dues'){
   const visible=visibleUnits();
   const eligible=visibleUnpaidCharges();
@@ -139,12 +152,7 @@ function render(){
   view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><button class="primary" data-tab="history">İşlem geçmişi / Geri al</button><button class="outline" data-action="backup">JSON kayıt yedeği indir</button><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek, kayıtları ve belge listesini içerir; yüklenen dosyalar ayrıca saklanır. Malik/oturan bilgileri de bulunduğu için güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
  }
  if(tab==='settings'&&state.admin)view.innerHTML=bankForm()+view.innerHTML;
- if(tab==='overview'){
-  const tasks=openTasks(state.tasks||[],today()).slice(0,5);
-  if(tasks.length)view.innerHTML+='<section class="panel history"><div class="toolbar"><h2>Yapılacak işler</h2><button class="outline small" data-tab="tasks">Tümü</button></div>'+tasks.map(taskRow).join('')+'</section>';
-  const pending=state.units.map(u=>({u,total:state.charges.filter(c=>c.unit_id===u.id).reduce((sum,c)=>sum+c.amount-c.paid,0)})).filter(x=>x.total>0);
-  view.innerHTML+='<section class="panel history"><div class="toolbar"><h2>Ödeme bekleyenler</h2><span class="muted">Tüm dönemler · '+money(state.totals.receivable)+'</span></div>'+(pending.map(({u,total})=>'<button class="pending-row" data-action="unit-detail" data-id="'+u.id+'"><strong>'+esc(u.label)+'</strong><span>'+money(total)+' <span aria-hidden="true">›</span></span></button>').join('')||'<p class="empty">Bekleyen aidat borcu yok.</p>')+'</section>';
- }
+
  syncChargeSelection();
 }
 const input=(name,label,type='text',value='',extra='')=>'<label for="f-'+name+'">'+label+'</label><input id="f-'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'>';
@@ -324,6 +332,7 @@ document.addEventListener('click',async e=>{
  else if(action==='task-detail'){const t=state.tasks.find(x=>x.id===id);if(!t)throw new Error('İş bulunamadı.');const d=state.decisions.find(x=>x.id===t.decision_id);openReadDialog(t.title,'<p>'+esc(statusName(t.status))+' · '+esc(t.assignee||'Sorumlu belirtilmedi')+(t.due_date?' · '+dateName(t.due_date):'')+'</p><p class="work-body">'+esc(t.notes)+'</p>'+(d?'<button type="button" class="outline" data-action="decision-detail" data-id="'+d.id+'">İlgili karar: '+esc(d.title)+'</button>':''));}
  else if(action==='complete-task'){const t=state.tasks.find(x=>x.id===id);btn.disabled=true;await api('tasks/manage','POST',taskSave(t,{status:t.status==='done'?'pending':'done'}));await refresh();toast('İşin durumu güncellendi.');}
  else if(action==='archive-task'||action==='archive-decision'){const kind=action.slice(8),row=(kind==='task'?state.tasks:state.decisions).find(x=>x.id===id);btn.disabled=true;await api(kind==='task'?'tasks/manage':'decisions/manage','POST',{operation:'archive',id,version:row.version,archived:!row.archived});await refresh();toast(row.archived?'Kayıt arşivden çıkarıldı.':'Kayıt arşivlendi.');}
+ else if(action==='show-pending'){openReadDialog('Ödeme bekleyenler','<p class="muted">Tüm dönemler · '+money(state.totals.receivable)+'</p>'+pendingRows(pendingUnits()));}
  else if(action==='show-notices'){tab='notices';render();}
  else if(action==='edit-charge'||action==='remove-charge')manageCharges(action==='edit-charge'?'edit':'delete',[id]);
  else if(action==='edit-selected-charges'||action==='remove-selected-charges')manageCharges(action==='edit-selected-charges'?'edit':'delete',[...selectedCharges]);
