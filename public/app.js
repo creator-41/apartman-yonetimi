@@ -1,8 +1,9 @@
-import { openTasks, taskSave, statusName } from './work.js?v=news-1';
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=news-1';
+import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=payment-1';
+import { openTasks, taskSave, statusName } from './work.js?v=payment-1';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=payment-1';
 import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=news-1';
+import { createApi } from './transport.js?v=payment-1';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -49,6 +50,17 @@ function newsHTML(limit=Infinity){
  ];
  return groups.map(([title,target,rows,html])=>'<section class="news-group"><div class="toolbar"><h3>'+title+'</h3><button class="small outline" data-tab="'+target+'">'+(rows.length>limit?'Tümü ('+rows.length+')':'Aç')+'</button></div>'+(rows.slice(0,limit).map(html).join('')||'<p class="muted">Henüz kayıt yok.</p>')+'</section>').join('');
 }
+function bankHTML(){
+ if(!state.settings.iban)return '';
+ return '<section class="panel bank-card"><div><h2>Aidat ödeme hesabı</h2><p>'+esc(state.settings.accountHolder)+'</p><p class="iban">'+esc(formatIban(state.settings.iban))+'</p></div><button class="outline" data-action="copy-iban">IBAN kopyala</button></section>';
+}
+function bankForm(){
+ return '<section class="panel history"><h2>Aidat ödeme hesabı</h2><form id="bankForm" class="setting-form"><label for="accountHolder">Hesap sahibi</label><input id="accountHolder" name="accountHolder" maxlength="100" value="'+esc(state.settings.accountHolder)+'"><label for="iban">IBAN</label><input id="iban" name="iban" maxlength="40" placeholder="TR…" autocomplete="off" value="'+esc(formatIban(state.settings.iban))+'"><p class="help">Kaydedilen hesap bilgileri ortak Aidatlar ekranında görünür. Kaldırmak için IBAN alanını boşaltın.</p><button class="primary" type="submit">Ödeme hesabını kaydet</button><p id="bankError" role="alert"></p></form></section>';
+}
+async function copyPaymentText(text,label){
+ try{await navigator.clipboard.writeText(text);toast(label);}
+ catch{openReadDialog('Metni kopyala','<textarea id="paymentCopy" readonly rows="7">'+esc(text)+'</textarea>');$('#paymentCopy').focus();$('#paymentCopy').select();}
+}
 function moreLinks(){return '<div class="more-grid">'+[['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular, tarihler ve durumlar'],['report','Aylık hesap özeti','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','Ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
 function render(){
  document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news'].includes(tab))));
@@ -64,9 +76,9 @@ function render(){
    const c=charges.find(c=>c.unit_id===u.id),remaining=c?c.amount-c.paid:0,old=earlierDebt(u.id);
    const badge=!c?(u.exempt?'Yönetim kararı ile muaf':'Aidat oluşturulmadı'):remaining===0?'Ödendi':c.paid?'Kısmi ödeme':'Bekliyor';
    const selection=state.admin&&bulkMode?'<label class="select-charge"><input type="checkbox" data-charge-select="'+(c?.id||'')+'" aria-label="'+esc(u.label)+' aidatını seç" '+(!c||c.paid>0?'disabled':'')+(c&&selectedCharges.has(c.id)?' checked':'')+'> Seç</label>':'';
-   return '<article class="dues-card">'+selection+'<div class="dues-main"><div><h3>'+esc(u.label)+'</h3>'+(c?.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'<span class="badge '+(remaining?(c.paid?'partial':'due'):'')+'">'+badge+'</span></div><div class="dues-balance"><small>Bu ay kalan</small><strong>'+(c?money(remaining):'—')+'</strong></div></div>'+(old?'<p class="old-debt">Önceki aylardan: <strong>'+money(old)+'</strong></p>':'')+'<div class="dues-actions"><button class="outline small" data-action="unit-detail" data-id="'+u.id+'">Ayrıntılar</button>'+(state.admin&&remaining>0?'<button class="primary" data-action="pay" data-id="'+c.id+'">Ödeme al</button>':'')+(state.admin&&c?chargeMenu(c):'')+'</div></article>';
+   return '<article class="dues-card">'+selection+'<div class="dues-main"><div><h3>'+esc(u.label)+'</h3>'+(c?.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'<span class="badge '+(remaining?(c.paid?'partial':'due'):'')+'">'+badge+'</span></div><div class="dues-balance"><small>Bu ay kalan</small><strong>'+(c?money(remaining):'—')+'</strong></div></div>'+(old?'<p class="old-debt">Önceki aylardan: <strong>'+money(old)+'</strong></p>':'')+'<div class="dues-actions"><button class="outline small" data-action="unit-detail" data-id="'+u.id+'">Ayrıntılar</button>'+(state.admin&&state.charges.some(c=>c.unit_id===u.id&&c.amount>c.paid)?'<button class="outline small" data-action="reminder" data-id="'+u.id+'">Hatırlatma hazırla</button>':'')+(state.admin&&remaining>0?'<button class="primary" data-action="pay" data-id="'+c.id+'">Ödeme al</button>':'')+(state.admin&&c?chargeMenu(c):'')+'</div></article>';
   }).join('');
-  view.innerHTML='<section class="panel"><div class="toolbar"><h2>Aidatlar</h2>'+monthFilter()+'</div><div class="toolbar"><p class="muted">'+charges.filter(c=>c.paid>=c.amount).length+' / '+charges.length+' bölüm ödedi · Kalan '+money(charges.reduce((sum,c)=>sum+c.amount-c.paid,0))+'</p>'+(state.admin?'<div class="actions"><button class="primary" data-action="charge">Aylık aidat oluştur</button><button class="outline" data-action="toggle-bulk" aria-pressed="'+bulkMode+'">'+(bulkMode?'Toplu işlemi kapat':'Toplu işlem')+'</button></div>':'')+'</div>'+(state.admin&&bulkMode?'<div class="bulk-tools"><label class="check"><input type="checkbox" id="selectAllCharges" aria-label="Ödeme girilmemiş tüm aidatları seç"> Tümünü seç</label><div class="actions"><button class="outline" data-action="edit-selected-charges" disabled>Toplu düzenle</button><button class="danger" data-action="remove-selected-charges" disabled>Toplu sil</button></div><p class="help" id="selectionSummary"></p><p class="help">Yalnızca ödeme girilmemiş aidatlar seçilebilir.</p></div>':'')+'<div class="dues-grid">'+unitsHTML+'</div><details class="secondary-section"><summary>Dışa aktar</summary><button class="outline small" data-action="csv">CSV indir</button></details></section>'+(state.admin?'<details class="panel history"><summary>Ödeme kayıtları · '+esc(monthName(selectedMonth))+'</summary><p class="help">Yanlış kaydedilmiş ödemeleri buradan iptal edebilirsiniz. İptal edilen tutar yeniden borca eklenir.</p>'+table(['Bölüm','Ödeme tarihi','Tutar','Not','İşlem'],state.payments.filter(p=>charges.some(c=>c.id===p.charge_id)).map(p=>'<tr><td>'+esc(unitName(charges.find(c=>c.id===p.charge_id).unit_id))+'</td><td>'+dateName(p.date)+'</td><td>'+money(p.amount)+'</td><td class="expense-name">'+esc(p.note)+'</td><td><button class="small danger" data-action="delete-payment" data-id="'+p.id+'">Ödemeyi iptal et</button></td></tr>'))+'</details>':'');
+  view.innerHTML=bankHTML()+'<section class="panel"><div class="toolbar"><h2>Aidatlar</h2>'+monthFilter()+'</div><div class="toolbar"><p class="muted">'+charges.filter(c=>c.paid>=c.amount).length+' / '+charges.length+' bölüm ödedi · Kalan '+money(charges.reduce((sum,c)=>sum+c.amount-c.paid,0))+'</p>'+(state.admin?'<div class="actions"><button class="primary" data-action="charge">Aylık aidat oluştur</button><button class="outline" data-action="toggle-bulk" aria-pressed="'+bulkMode+'">'+(bulkMode?'Toplu işlemi kapat':'Toplu işlem')+'</button></div>':'')+'</div>'+(state.admin&&bulkMode?'<div class="bulk-tools"><label class="check"><input type="checkbox" id="selectAllCharges" aria-label="Ödeme girilmemiş tüm aidatları seç"> Tümünü seç</label><div class="actions"><button class="outline" data-action="edit-selected-charges" disabled>Toplu düzenle</button><button class="danger" data-action="remove-selected-charges" disabled>Toplu sil</button></div><p class="help" id="selectionSummary"></p><p class="help">Yalnızca ödeme girilmemiş aidatlar seçilebilir.</p></div>':'')+'<div class="dues-grid">'+unitsHTML+'</div><details class="secondary-section"><summary>Dışa aktar</summary><button class="outline small" data-action="csv">CSV indir</button></details></section>'+(state.admin?'<details class="panel history"><summary>Ödeme kayıtları · '+esc(monthName(selectedMonth))+'</summary><p class="help">Yanlış kaydedilmiş ödemeleri buradan iptal edebilirsiniz. İptal edilen tutar yeniden borca eklenir.</p>'+table(['Bölüm','Ödeme tarihi','Tutar','Not','İşlem'],state.payments.filter(p=>charges.some(c=>c.id===p.charge_id)).map(p=>'<tr><td>'+esc(unitName(charges.find(c=>c.id===p.charge_id).unit_id))+'</td><td>'+dateName(p.date)+'</td><td>'+money(p.amount)+'</td><td class="expense-name">'+esc(p.note)+'</td><td><button class="small danger" data-action="delete-payment" data-id="'+p.id+'">Ödemeyi iptal et</button></td></tr>'))+'</details>':'');
  }else if(tab==='expenses'){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Ortak giderler</h2><div class="actions">'+monthFilter()+(state.admin?'<button class="primary" data-action="expense">Gider ekle</button>':'')+'</div></div><p class="muted">'+esc(monthName(selectedMonth))+' toplamı: <strong>'+money(expenses.reduce((s,e)=>s+e.amount,0))+'</strong></p>'+table(['Tarih','Kategori','Açıklama','Tutar','Belge',...(state.admin?['İşlem']:[])],expenses.map(e=>'<tr><td>'+dateName(e.date)+'</td><td><span class="badge">'+esc(e.category)+'</span></td><td class="expense-name">'+esc(e.description)+'</td><td>'+money(e.amount)+'</td><td>'+(state.admin||(e.files||[]).length?'<button class="small outline" data-action="expense-files" data-id="'+e.id+'">Belgeler'+((e.files||[]).length?' ('+e.files.length+')':'')+'</button>':'—')+'</td>'+(state.admin?'<td><button class="small outline" data-action="edit-expense" data-id="'+e.id+'">Düzenle</button> <button class="small danger" data-action="delete-expense" data-id="'+e.id+'">Sil</button></td>':'')+'</tr>'))+'</section>';
  }else if(tab==='news'){
@@ -84,6 +96,7 @@ function render(){
  }else if(tab==='settings'&&state.admin){
   view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><button class="outline" data-action="backup">JSON kayıt yedeği indir</button><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek, kayıtları ve belge listesini içerir; yüklenen dosyalar ayrıca saklanır. Malik/oturan bilgileri de bulunduğu için güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
  }
+ if(tab==='settings'&&state.admin)view.innerHTML+=bankForm();
  if(tab==='overview'){
   const tasks=openTasks(state.tasks||[],today()).slice(0,5);
   if(tasks.length)view.innerHTML+='<section class="panel history"><div class="toolbar"><h2>Yapılacak işler</h2><button class="outline small" data-tab="tasks">Tümü</button></div>'+tasks.map(taskRow).join('')+'</section>';
@@ -203,6 +216,12 @@ document.addEventListener('change',e=>{
  else if(e.target.id==='selectAllCharges'){selectedCharges.clear();if(e.target.checked)for(const c of unpaidCharges(state.charges.filter(c=>c.period===selectedMonth)))selectedCharges.add(c.id);syncChargeSelection();}
 });
 document.addEventListener('submit',async e=>{
+ if(e.target.id==='bankForm'){
+  e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;$('#bankError').textContent='';
+  try{const f=new FormData(e.target),iban=normalizeIban(f.get('iban')),accountHolder=String(f.get('accountHolder')||'').trim();if(iban&&!accountHolder)throw new Error('Hesap sahibini girin.');
+   await api('bank','PUT',{iban,accountHolder,expected:{iban:state.settings.iban||'',accountHolder:state.settings.accountHolder||''}});await refresh();toast('Ödeme hesabı kaydedildi.');
+  }catch(err){$('#bankError').textContent=err.message;}finally{button.disabled=false;}return;
+ }
  if(e.target.id!=='settingsForm')return;e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;
  try{const f=new FormData(e.target);await api('settings','PUT',{name:f.get('name'),monthlyDues:Number(f.get('monthlyDues')),openingBalance:Number(f.get('openingBalance'))});await refresh();toast('Ayarlar kaydedildi.');}catch(err){error(err);}finally{button.disabled=false;}
 });
@@ -219,6 +238,12 @@ document.addEventListener('click',async e=>{
   if(next>='2000-01'&&next<='2099-12'){selectedMonth=next;selectedCharges.clear();render();}
  }
  else if(action==='toggle-bulk'){bulkMode=!bulkMode;selectedCharges.clear();render();}
+ else if(action==='copy-iban'){if(!state.settings.iban)throw new Error('IBAN henüz eklenmedi.');await copyPaymentText(state.settings.iban,'IBAN kopyalandı.');}
+ else if(action==='reminder'){
+  if(!state.admin)throw new Error('Yönetici girişi gerekli.');
+  openReadDialog('Ödeme hatırlatması','<label for="reminderText">Paylaşılacak metin</label><textarea id="reminderText" rows="12" maxlength="12000">'+esc(reminderText(state,id,today()))+'</textarea><div class="actions report-actions"><button type="button" class="primary" data-action="copy-reminder">Metni kopyala</button></div><p class="help">Metni kontrol edip WhatsApp’a yapıştırabilirsiniz.</p>');
+ }
+ else if(action==='copy-reminder'){await copyPaymentText($('#reminderText').value,'Hatırlatma kopyalandı. WhatsApp’a yapıştırabilirsiniz.');}
  else if(action==='unit-detail'){
   const u=state.units.find(u=>u.id===id);if(!u)throw new Error('Bölüm bulunamadı.');
   const items=state.charges.filter(c=>c.unit_id===id).sort((a,b)=>b.period.localeCompare(a.period));
@@ -319,5 +344,5 @@ document.addEventListener('click',async e=>{
  }catch(err){error(err);btn.disabled=false;}
 });
 refresh().catch(error);
-setInterval(()=>{if(!$('#modal').open&&!document.hidden&&!$('#settingsForm'))refresh().catch(error);},60000);
+setInterval(()=>{if(!$('#modal').open&&!document.hidden&&!$('#settingsForm')&&!$('#bankForm'))refresh().catch(error);},60000);
 
