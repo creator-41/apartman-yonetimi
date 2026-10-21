@@ -1,13 +1,14 @@
-import { initPwa } from './pwa.js?v=simple-1';
-import { filterUnits } from './dues-filters.js?v=simple-1';
-import { changeInfo } from './history.js?v=simple-1';
-import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=simple-1';
-import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=simple-1';
-import { openTasks, taskSave, statusName } from './work.js?v=simple-1';
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=simple-1';
-import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=simple-1';
+import { unitPaymentPlan } from './unit-payments.js?v=unitpay-1';
+import { initPwa } from './pwa.js?v=unitpay-1';
+import { filterUnits } from './dues-filters.js?v=unitpay-1';
+import { changeInfo } from './history.js?v=unitpay-1';
+import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=unitpay-1';
+import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=unitpay-1';
+import { openTasks, taskSave, statusName } from './work.js?v=unitpay-1';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=unitpay-1';
+import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=unitpay-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=simple-1';
+import { createApi } from './transport.js?v=unitpay-1';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -21,6 +22,7 @@ let documentTarget=null;
 let workFilter="open";let decisionArchive=false;
 let uploadingDocument=false;
 let createdPaymentId=null;
+let unitPaymentContext=null,createdPaymentGroup=null;
 let changeHistory=[],historyError="";
 'use strict';
 let state,tab='overview',selectedMonth=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit'}).format(new Date()),dialogAction;
@@ -90,7 +92,7 @@ function changeSummary(entry){
 function historyHTML(){
  return '<section class="panel"><div class="toolbar"><h2>İşlem geçmişi</h2><button class="outline" data-action="refresh-history">Yenile</button></div><p class="help">Yeni ödeme ve gider işlemlerinin son 100 kaydı. Aynı kayıtta birden fazla değişiklik varsa en son işlemden başlayın.</p>'+(historyError?'<p role="alert">'+esc(historyError)+'</p>':'')+(changeHistory.map(entry=>{
   const info=changeInfo(entry);
-  return '<article class="change-item"><div class="toolbar"><h3>'+esc(info.title)+'</h3>'+(info.canUndo?'<button class="outline small" data-action="undo-change" data-id="'+entry.id+'">Geri al</button>':'<span class="badge">'+(entry.undone_at?'Geri alındı':'Geri alma kaydı')+'</span>')+'</div>'+changeSummary(entry)+'<small>'+esc(timeName(entry.created_at))+' · '+esc(entry.actor_label)+'</small>'+(entry.undone_at?'<p class="help">Geri alan: '+esc(entry.undone_label)+' · '+esc(timeName(entry.undone_at))+'</p>':'')+'</article>';
+  return '<article class="change-item"><div class="toolbar"><h3>'+esc(info.title)+'</h3>'+(info.canUndo?'<button class="outline small" data-action="undo-change" data-id="'+entry.id+'">Geri al</button>'+(entry.batch_id?'<button class="outline small" data-action="undo-payment-batch" data-batch-id="'+entry.batch_id+'">Tüm ödemeyi geri al</button>':''):'<span class="badge">'+(entry.undone_at?'Geri alındı':'Geri alma kaydı')+'</span>')+'</div>'+changeSummary(entry)+'<small>'+esc(timeName(entry.created_at))+' · '+esc(entry.actor_label)+'</small>'+(entry.undone_at?'<p class="help">Geri alan: '+esc(entry.undone_label)+' · '+esc(timeName(entry.undone_at))+'</p>':'')+'</article>';
  }).join('')||'<p class="empty">Yeni ödeme ve gider işlemleri burada görünecek.</p>')+'<details class="secondary-section"><summary>Diğer işlem kayıtları</summary>'+table(['Tarih','İşlem','Yönetici'],(state.audit||[]).map(a=>'<tr><td>'+esc(timeName(a.created_at))+'</td><td>'+esc(a.action)+'</td><td>'+esc(a.actor?'Yönetici '+a.actor.slice(0,8):'Yönetici')+'</td></tr>'))+'</details></section>';
 }
 function visibleUnits(){return filterUnits(state.units,state.charges,selectedMonth,unitQuery,duesFilter);}
@@ -105,6 +107,35 @@ function updateUnitSearch(e){
  const search=$('#unitSearch');search.focus();if(position!==null)search.setSelectionRange(position,position);
 }
 document.addEventListener('compositionend',e=>{if(e.target.id==='unitSearch')updateUnitSearch(e);});
+function unitPaymentPreview(plan){
+ return table(['Ay','Ödenecek','Ayda kalan'],plan.allocations.map(a=>'<tr><td>'+esc(monthName(a.period))+'</td><td>'+money(a.amount)+'</td><td>'+money(a.remaining)+'</td></tr>'))+'<p>Ödeme sonrası toplam borç: <strong>'+money(plan.remaining)+'</strong></p>';
+}
+function updateUnitPaymentPreview(){
+ if(!unitPaymentContext)return;
+ try{const plan=unitPaymentPlan(unitPaymentContext.charges,unitPaymentContext.unitId,Number($('#f-amount').value));$('#unitPaymentPreview').innerHTML=unitPaymentPreview(plan);$('#dialogSubmit').disabled=false;}
+ catch(err){$('#unitPaymentPreview').textContent=err.message;$('#dialogSubmit').disabled=true;}
+}
+function openUnitPayment(unitId){
+ if(!state.admin)throw new Error('Yönetici girişi gerekli.');
+ const charges=state.charges.filter(c=>c.unit_id===unitId).map(c=>({...c})),plan=unitPaymentPlan(charges,unitId),requestId=crypto.randomUUID();
+ openDialog(unitName(unitId)+' · Toplam ödeme al','<p>Toplam kalan borç: <strong>'+money(plan.total)+'</strong></p>'+input('amount','Ödenen toplam tutar (TL)','number',plan.amount/100,'required min="0.01" step="0.01" max="'+Math.min(plan.total/100,10000000)+'"')+'<p class="help">En eski borçtan başlayarak dağıtılır.</p><div id="unitPaymentPreview">'+unitPaymentPreview(plan)+'</div>'+input('date','Ödeme tarihi','date',today(),'required min="2000-01-01" max="2099-12-31"')+input('note','Not (yalnızca yönetici görür)','text','','maxlength="200"'),async f=>{
+  const amount=Number(f.get('amount')),preview=unitPaymentPlan(charges,unitId,amount);
+  const result=await api('payments/unit','POST',{unitId,requestId,amount,date:f.get('date'),note:f.get('note'),expected:preview.expected});
+  createdPaymentGroup=result;createdPaymentId=null;toast(result.replayed?'Ödeme daha önce kaydedilmiş; kayıtlar açılıyor.':'Ödeme aylara dağıtılarak kaydedildi.');
+ },'Ödemeyi kaydet');
+ unitPaymentContext={charges,unitId};$('#dialogSubmit').disabled=false;
+}
+function showPaymentGroup(group){
+ const unchanged=group.allocations.every(a=>state.payments.some(p=>p.id===a.paymentId&&p.amount===a.amount&&p.charge_id===a.chargeId&&p.date===group.date));
+ const remaining=state.charges.filter(c=>c.unit_id===group.unitId).reduce((sum,c)=>sum+c.amount-c.paid,0);
+ openReadDialog(unitName(group.unitId)+' · Ödeme dağılımı','<p>'+dateName(group.date)+' · Toplam <strong>'+money(group.amount)+'</strong></p>'+(!unchanged?'<p class="note">Bu ödemenin bir kısmı sonradan değişmiş. Güncel ödeme kayıtlarını kontrol edin.</p>':'')+table(['Ay','Ödeme','Makbuz'],group.allocations.map(a=>'<tr><td>'+esc(monthName(a.period))+'</td><td>'+money(a.amount)+'</td><td>'+(state.payments.some(p=>p.id===a.paymentId)?'<button type="button" class="outline small" data-action="receipt" data-id="'+a.paymentId+'">Makbuz</button>':'İptal edilmiş')+'</td></tr>'))+'<p>Güncel toplam borç: <strong>'+money(remaining)+'</strong></p>'+(unchanged?'<button type="button" class="outline" data-action="undo-payment-batch" data-batch-id="'+esc(group.batchId)+'">Tüm ödemeyi geri al</button>':''));
+}
+async function confirmBatchUndo(id){
+ if(!state.admin)throw new Error('Yönetici girişi gerekli.');
+ const group=await api('payments/batch','POST',{id});
+ if(!group.canUndo)throw new Error('Bu ödemenin bir kısmı iptal edilmiş veya geri alınmış. İşlem geçmişinden kayıtları kontrol edin.');
+ openDialog('Toplam ödemeyi geri al','<p><strong>'+esc(unitName(group.unitId))+'</strong> · '+dateName(group.date)+'</p>'+table(['Ay','Geri alınacak'],group.allocations.map(a=>'<tr><td>'+esc(monthName(a.period))+'</td><td>'+money(a.amount)+'</td></tr>'))+'<div class="note"><p>Kasa değişimi: <strong>'+signedMoney(-group.amount)+'</strong></p><p>Aidat borcu değişimi: <strong>'+signedMoney(group.amount)+'</strong></p></div><p>Bu ödemeye ait bütün aylar birlikte geri alınsın mı?</p>',async()=>{await api('payments/batch/undo','POST',{id});toast('Toplam ödeme geri alındı.');},'Tüm ödemeyi geri al');$('#dialogSubmit').disabled=false;
+}
 function moreLinks(){
  const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
  return '<section class="more-section"><h2>Bilgiler</h2>'+links([['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
@@ -129,7 +160,7 @@ function render(){
    const c=charges.find(c=>c.unit_id===u.id),remaining=c?c.amount-c.paid:0,old=earlierDebt(u.id);
    const badge=!c?(u.exempt?'Yönetim kararı ile muaf':'Aidat oluşturulmadı'):remaining===0?'Ödendi':c.paid?'Kısmi ödeme':'Bekliyor';
    const selection=state.admin&&bulkMode?'<label class="select-charge"><input type="checkbox" data-charge-select="'+(c?.id||'')+'" aria-label="'+esc(u.label)+' aidatını seç" '+(!c||c.paid>0?'disabled':'')+(c&&selectedCharges.has(c.id)?' checked':'')+'> Seç</label>':'';
-   return '<article class="dues-card">'+selection+'<div class="dues-main"><div><h3>'+esc(u.label)+'</h3>'+(c?.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'<span class="badge '+(remaining?(c.paid?'partial':'due'):'')+'">'+badge+'</span></div><div class="dues-balance"><small>Bu ay kalan</small><strong>'+(c?money(remaining):'—')+'</strong></div></div>'+(old?'<p class="old-debt">Önceki aylardan: <strong>'+money(old)+'</strong></p>':'')+'<div class="dues-actions"><button class="outline small" data-action="unit-detail" data-id="'+u.id+'">Ayrıntılar</button>'+(state.admin&&state.charges.some(c=>c.unit_id===u.id&&c.amount>c.paid)?'<button class="outline small" data-action="reminder" data-id="'+u.id+'">Hatırlatma hazırla</button>':'')+(state.admin&&remaining>0?'<button class="primary" data-action="pay" data-id="'+c.id+'">Ödeme al</button>':'')+(state.admin&&c?chargeMenu(c):'')+'</div></article>';
+   return '<article class="dues-card">'+selection+'<div class="dues-main"><div><h3>'+esc(u.label)+'</h3>'+(c?.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'<span class="badge '+(remaining?(c.paid?'partial':'due'):'')+'">'+badge+'</span></div><div class="dues-balance"><small>Bu ay kalan</small><strong>'+(c?money(remaining):'—')+'</strong></div></div>'+(old?'<p class="old-debt">Önceki aylardan: <strong>'+money(old)+'</strong></p>':'')+'<div class="dues-actions"><button class="outline small" data-action="unit-detail" data-id="'+u.id+'">Ayrıntılar</button>'+(state.admin&&state.charges.some(c=>c.unit_id===u.id&&c.amount>c.paid)?'<button class="outline small" data-action="reminder" data-id="'+u.id+'">Hatırlatma hazırla</button>':'')+(state.admin&&state.charges.some(c=>c.unit_id===u.id&&c.amount>c.paid)?'<button class="primary" data-action="pay-unit" data-id="'+u.id+'">Ödeme al</button>':'')+(state.admin&&c?chargeMenu(c):'')+'</div></article>';
   }).join('');
   view.innerHTML=bankHTML()+'<section class="panel"><div class="toolbar"><h2>Aidatlar</h2>'+monthFilter()+'</div><div class="toolbar"><p class="muted">'+charges.filter(c=>c.paid>=c.amount).length+' / '+charges.length+' bölüm ödedi · Kalan '+money(charges.reduce((sum,c)=>sum+c.amount-c.paid,0))+'</p>'+(state.admin?'<div class="actions"><button class="primary" data-action="charge">Aylık aidat oluştur</button><button class="outline" data-action="toggle-bulk" aria-pressed="'+bulkMode+'">'+(bulkMode?'Toplu işlemi kapat':'Toplu işlem')+'</button></div>':'')+'</div>'+(state.admin&&bulkMode?'<div class="bulk-tools"><label class="check"><input type="checkbox" id="selectAllCharges" aria-label="Görünen ödeme girilmemiş aidatları seç"> Görünenleri seç</label><div class="actions"><button class="outline" data-action="edit-selected-charges" disabled>Toplu düzenle</button><button class="danger" data-action="remove-selected-charges" disabled>Toplu sil</button></div><p class="help" id="selectionSummary"></p><p class="help">Yalnızca ödeme girilmemiş aidatlar seçilebilir.</p></div>':'')+duesFiltersHTML(visible.length)+'<div class="dues-grid">'+(unitsHTML||'<div class="empty">Aramaya uygun bölüm bulunamadı.</div>')+'</div><details class="secondary-section"><summary>Dışa aktar</summary><button class="outline small" data-action="csv">CSV indir</button></details></section>'+(state.admin?'<details class="panel history"><summary>Ödeme kayıtları · '+esc(monthName(selectedMonth))+'</summary><p class="help">Yanlış kaydedilmiş ödemeleri buradan iptal edebilirsiniz. İptal edilen tutar yeniden borca eklenir.</p>'+table(['Bölüm','Ödeme tarihi','Tutar','Not','İşlem'],state.payments.filter(p=>charges.some(c=>c.id===p.charge_id)).map(p=>'<tr><td>'+esc(unitName(charges.find(c=>c.id===p.charge_id).unit_id))+'</td><td>'+dateName(p.date)+'</td><td>'+money(p.amount)+'</td><td class="expense-name">'+esc(p.note)+'</td><td><button class="small outline" data-action="receipt" data-id="'+p.id+'">Makbuz</button> <button class="small danger" data-action="delete-payment" data-id="'+p.id+'">Ödemeyi iptal et</button></td></tr>'))+'</details>':'');
  }else if(tab==='expenses'){
@@ -157,8 +188,8 @@ function render(){
 }
 const input=(name,label,type='text',value='',extra='')=>'<label for="f-'+name+'">'+label+'</label><input id="f-'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'>';
 function openDialog(title,fields,action,submit='Kaydet'){
- chargeDialogContext=null;reportContext=null;
- $('#dialogSubmit').hidden=false;
+ chargeDialogContext=null;reportContext=null;unitPaymentContext=null;
+ $('#dialogSubmit').hidden=false;$('#dialogSubmit').disabled=false;
  $('#dialogTitle').textContent=title;$('#dialogFields').innerHTML=fields;$('#dialogError').textContent='';$('#dialogSubmit').textContent=submit;dialogAction=action;$('#modal').showModal();
 }
 function openReadDialog(title,fields){
@@ -248,10 +279,15 @@ function manageCharges(mode,ids){
  },mode==='edit'?'Değişiklikleri kaydet':'Seçili aidatları sil');
  chargeDialogContext={mode,rows};updateChargePreview();
 }
-document.addEventListener('input',e=>{if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id))updateChargePreview();});
+document.addEventListener('input',e=>{if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
 $('#dialogForm').addEventListener('submit',async e=>{
  e.preventDefault();if(!dialogAction)return;const button=$('#dialogSubmit');button.disabled=true;
- try{await dialogAction(new FormData(e.target));$('#modal').close();await refresh();if(createdPaymentId){const paymentId=createdPaymentId;createdPaymentId=null;showReceipt(paymentId);}}catch(err){$('#dialogError').textContent=err.message;}finally{button.disabled=false;}
+ try{
+  await dialogAction(new FormData(e.target));$('#modal').close();
+  const paymentId=createdPaymentId,group=createdPaymentGroup;createdPaymentId=null;createdPaymentGroup=null;
+  try{await refresh();if(group)showPaymentGroup(group);else if(paymentId)showReceipt(paymentId);}
+  catch(err){error(new Error('İşlem tamamlandı, ekran yenilenemedi. Tekrar kaydetmeden önce sayfayı yenileyin. '+err.message));}
+ }catch(err){$('#dialogError').textContent=err.message;}finally{button.disabled=false;}
 });
 $('#closeModal').addEventListener('click',()=>{if(!uploadingDocument)$('#modal').close();});
 $('#modal').addEventListener('cancel',e=>{if(uploadingDocument)e.preventDefault();});
@@ -301,12 +337,14 @@ document.addEventListener('click',async e=>{
   openReadDialog('Ödeme hatırlatması','<label for="reminderText">Paylaşılacak metin</label><textarea id="reminderText" rows="12" maxlength="12000">'+esc(reminderText(state,id,today()))+'</textarea><div class="actions report-actions"><button type="button" class="primary" data-action="copy-reminder">Metni kopyala</button></div><p class="help">Metni kontrol edip WhatsApp’a yapıştırabilirsiniz.</p>');
  }
  else if(action==='copy-reminder'){await copyPaymentText($('#reminderText').value,'Hatırlatma kopyalandı. WhatsApp’a yapıştırabilirsiniz.');}
+ else if(action==='pay-unit'){openUnitPayment(id);}
+ else if(action==='undo-payment-batch'){await confirmBatchUndo(btn.dataset.batchId);}
  else if(action==='unit-detail'){
   const u=state.units.find(u=>u.id===id);if(!u)throw new Error('Bölüm bulunamadı.');
   const items=state.charges.filter(c=>c.unit_id===id).sort((a,b)=>b.period.localeCompare(a.period));
   const ledger=unitStatement(state,id);
   const rows=ledger.rows.map(row=>'<tr><td>'+dateName(row.date)+'</td><td>'+esc(row.label)+(row.type==='payment'?'<button type="button" class="outline small" data-action="receipt" data-id="'+row.id+'">Makbuz</button>':'')+'<small class="ledger-period">'+esc(monthName(row.period))+'</small>'+(row.note?'<small class="ledger-period">'+esc(row.note)+'</small>':'')+'</td><td>'+ (row.debit?money(row.debit):'—')+'</td><td>'+(row.credit?money(row.credit):'—')+'</td><td>'+money(row.balance)+'</td></tr>');
-  openReadDialog(u.label+' · Hesap dökümü','<div class="statement-totals"><p>Borçlandırma <strong>'+money(ledger.debit)+'</strong></p><p>Ödemeler <strong>'+money(ledger.credit)+'</strong></p><p>Kalan borç <strong>'+money(ledger.balance)+'</strong></p></div>'+(u.exempt?'<p><span class="badge">Yönetim kararı ile muaf</span></p>':'')+shareButtons()+table(['Tarih','İşlem','Borç','Ödeme','Bakiye'],rows,'Henüz hesap hareketi yok.')+(state.admin?'<div class="statement-payments">'+items.filter(c=>c.amount>c.paid).map(c=>'<div class="bar-row"><span>'+esc(monthName(c.period))+' · '+money(c.amount-c.paid)+'</span><button type="button" class="primary small" data-action="pay" data-id="'+c.id+'">Ödeme al</button></div>').join('')+'<button type="button" class="outline" data-action="opening-charge" data-id="'+id+'">Eski borç ekle</button></div>':''));
+  openReadDialog(u.label+' · Hesap dökümü','<div class="statement-totals"><p>Borçlandırma <strong>'+money(ledger.debit)+'</strong></p><p>Ödemeler <strong>'+money(ledger.credit)+'</strong></p><p>Kalan borç <strong>'+money(ledger.balance)+'</strong></p></div>'+(u.exempt?'<p><span class="badge">Yönetim kararı ile muaf</span></p>':'')+shareButtons()+table(['Tarih','İşlem','Borç','Ödeme','Bakiye'],rows,'Henüz hesap hareketi yok.')+(state.admin?'<div class="statement-payments">'+(ledger.balance>0?'<button type="button" class="primary" data-action="pay-unit" data-id="'+id+'">Toplam borçtan ödeme al</button>':'')+items.filter(c=>c.amount>c.paid).map(c=>'<div class="bar-row"><span>'+esc(monthName(c.period))+' · '+money(c.amount-c.paid)+'</span><button type="button" class="primary small" data-action="pay" data-id="'+c.id+'">Ödeme al</button></div>').join('')+'<button type="button" class="outline" data-action="opening-charge" data-id="'+id+'">Eski borç ekle</button></div>':''));
   reportContext={kind:'unit',id};
  }
  else if(action==='opening-charge'){
