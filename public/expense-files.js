@@ -11,9 +11,9 @@ export function expenseUpdate(expense,values){
  return {operation:'update',expenseId:expense.id,expected:{category:expense.category,description:expense.description,amount:expense.amount,date:expense.date},...values};
 }
 // The expense is already saved before any file transfer. Retrying never creates a new expense.
-export async function uploadReceipt(api,expenseId,file){
+export async function uploadReceipt(api,expenseId,file,kind='expense'){
  const metadata=validateReceipt(file);
- const result=await api('expenses/manage','POST',{operation:'reserve',expenseId,...metadata});
+ const result=await api('expenses/manage','POST',{operation:kind==='decision'?'reserve-decision':'reserve',...(kind==='decision'?{decisionId:expenseId}:{expenseId}),...metadata});
  const reserved=result.file;
  try{
   await api('files/upload','POST',{path:reserved.path,file});

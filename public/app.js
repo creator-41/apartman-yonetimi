@@ -1,7 +1,8 @@
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=receipts-1';
+import { openTasks, taskSave, statusName } from './work.js?v=work-1';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=work-1';
 import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=receipts-1';
+import { createApi } from './transport.js?v=work-1';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -10,7 +11,8 @@ const selectedCharges=new Set();
 let chargeDialogContext=null;
 let bulkMode=false;
 let reportContext=null;
-let documentExpenseId=null;
+let documentTarget=null;
+let workFilter="open";let decisionArchive=false;
 let uploadingDocument=false;
 'use strict';
 let state,tab='overview',selectedMonth=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit'}).format(new Date()),dialogAction;
@@ -39,9 +41,9 @@ function cards(){
 }
 function earlierDebt(unitId){return state.charges.filter(c=>c.unit_id===unitId&&c.period<selectedMonth).reduce((sum,c)=>sum+c.amount-c.paid,0);}
 function chargeMenu(c){return '<details class="row-menu"><summary aria-label="Aidat işlemleri">⋯</summary><div class="row-menu-items"><button class="small outline" data-action="edit-charge" data-id="'+c.id+'" '+(c.paid>0?'disabled':'')+'>Düzenle</button><button class="small danger" data-action="remove-charge" data-id="'+c.id+'" '+(c.paid>0?'disabled':'')+'>Sil</button>'+(c.paid>0?'<small>Ödeme kaydı olan aidat korunur.</small>':'')+'</div></details>';}
-function moreLinks(){return '<div class="more-grid">'+[['report','Aylık hesap özeti','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','Ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
+function moreLinks(){return '<div class="more-grid">'+[['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular, tarihler ve durumlar'],['report','Aylık hesap özeti','Kasa, tahsilat ve giderler'],['notices','Duyurular','Apartmandan haberler'],...(state.admin?[['units','Daireler ve dükkân','Bilgiler ve aidat muafiyeti'],['settings','Yönetim','Ayarlar, yedek ve işlem geçmişi']]:[])].map(([target,title,help])=>'<button class="panel more-link" data-tab="'+target+'"><strong>'+title+'</strong><span>'+help+'</span><span aria-hidden="true">→</span></button>').join('')+(state.admin?'<button class="panel more-link" data-action="opening-charge"><strong>Eski borç girişi</strong><span>Önceki dönemlerden kalan borçlar</span><span aria-hidden="true">→</span></button>':'')+'</div>';}
 function render(){
- document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report'].includes(tab))));
+ document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks'].includes(tab))));
  const view=$('#view'),charges=state.charges.filter(c=>c.period===selectedMonth),expenses=state.expenses.filter(e=>e.date.startsWith(selectedMonth));
  if(tab==='overview'){
   const expected=charges.reduce((s,c)=>s+c.amount,0),paid=charges.reduce((s,c)=>s+c.paid,0),paidCount=charges.filter(c=>c.paid>=c.amount).length;
@@ -59,6 +61,8 @@ function render(){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Aidatlar</h2>'+monthFilter()+'</div><div class="toolbar"><p class="muted">'+charges.filter(c=>c.paid>=c.amount).length+' / '+charges.length+' bölüm ödedi · Kalan '+money(charges.reduce((sum,c)=>sum+c.amount-c.paid,0))+'</p>'+(state.admin?'<div class="actions"><button class="primary" data-action="charge">Aylık aidat oluştur</button><button class="outline" data-action="toggle-bulk" aria-pressed="'+bulkMode+'">'+(bulkMode?'Toplu işlemi kapat':'Toplu işlem')+'</button></div>':'')+'</div>'+(state.admin&&bulkMode?'<div class="bulk-tools"><label class="check"><input type="checkbox" id="selectAllCharges" aria-label="Ödeme girilmemiş tüm aidatları seç"> Tümünü seç</label><div class="actions"><button class="outline" data-action="edit-selected-charges" disabled>Toplu düzenle</button><button class="danger" data-action="remove-selected-charges" disabled>Toplu sil</button></div><p class="help" id="selectionSummary"></p><p class="help">Yalnızca ödeme girilmemiş aidatlar seçilebilir.</p></div>':'')+'<div class="dues-grid">'+unitsHTML+'</div><details class="secondary-section"><summary>Dışa aktar</summary><button class="outline small" data-action="csv">CSV indir</button></details></section>'+(state.admin?'<details class="panel history"><summary>Ödeme kayıtları · '+esc(monthName(selectedMonth))+'</summary><p class="help">Yanlış kaydedilmiş ödemeleri buradan iptal edebilirsiniz. İptal edilen tutar yeniden borca eklenir.</p>'+table(['Bölüm','Ödeme tarihi','Tutar','Not','İşlem'],state.payments.filter(p=>charges.some(c=>c.id===p.charge_id)).map(p=>'<tr><td>'+esc(unitName(charges.find(c=>c.id===p.charge_id).unit_id))+'</td><td>'+dateName(p.date)+'</td><td>'+money(p.amount)+'</td><td class="expense-name">'+esc(p.note)+'</td><td><button class="small danger" data-action="delete-payment" data-id="'+p.id+'">Ödemeyi iptal et</button></td></tr>'))+'</details>':'');
  }else if(tab==='expenses'){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Ortak giderler</h2><div class="actions">'+monthFilter()+(state.admin?'<button class="primary" data-action="expense">Gider ekle</button>':'')+'</div></div><p class="muted">'+esc(monthName(selectedMonth))+' toplamı: <strong>'+money(expenses.reduce((s,e)=>s+e.amount,0))+'</strong></p>'+table(['Tarih','Kategori','Açıklama','Tutar','Belge',...(state.admin?['İşlem']:[])],expenses.map(e=>'<tr><td>'+dateName(e.date)+'</td><td><span class="badge">'+esc(e.category)+'</span></td><td class="expense-name">'+esc(e.description)+'</td><td>'+money(e.amount)+'</td><td>'+(state.admin||(e.files||[]).length?'<button class="small outline" data-action="expense-files" data-id="'+e.id+'">Belgeler'+((e.files||[]).length?' ('+e.files.length+')':'')+'</button>':'—')+'</td>'+(state.admin?'<td><button class="small outline" data-action="edit-expense" data-id="'+e.id+'">Düzenle</button> <button class="small danger" data-action="delete-expense" data-id="'+e.id+'">Sil</button></td>':'')+'</tr>'))+'</section>';
+ }else if(tab==='decisions'||tab==='tasks'){
+  view.innerHTML=workHTML();
  }else if(tab==='report'){
   view.innerHTML=reportHTML();
  }else if(tab==='more'){
@@ -71,6 +75,8 @@ function render(){
   view.innerHTML='<section class="panel"><h2>Yönetim ayarları</h2><form id="settingsForm" class="setting-form"><label for="name">Apartman adı</label><input id="name" name="name" required maxlength="100" value="'+esc(state.settings.name)+'"><div class="form-grid"><div><label for="monthlyDues">Güncel aylık aidat (TL)</label><input id="monthlyDues" name="monthlyDues" type="number" min="0.01" step="0.01" required value="'+Number(state.settings.monthlyDues)/100+'"></div><div><label for="openingBalance">Açılış kasa bakiyesi (TL)</label><input id="openingBalance" name="openingBalance" type="number" min="0" step="0.01" required value="'+Number(state.settings.openingBalance)/100+'"></div></div><p class="help">Aidat tutarını değiştirmek önceki borçları değiştirmez. Ay için “Aylık aidat oluştur” işlemini ayrıca uygulayın. Açılış bakiyesi sistem öncesinden devreden tutardır.</p><button class="primary" type="submit">Ayarları kaydet</button></form></section><section class="panel history"><div class="toolbar"><h2>Kayıtlar ve yedek</h2><div class="actions"><button class="outline" data-action="backup">JSON kayıt yedeği indir</button><button class="outline" data-action="print">Yazdır</button></div></div><p class="help">Yedek, kayıtları ve belge listesini içerir; yüklenen dosyalar ayrıca saklanır. Malik/oturan bilgileri de bulunduğu için güvenli yerde saklayın. İşlem geçmişi son 100 değişikliği gösterir.</p>'+table(['Tarih','İşlem'],state.audit.map(a=>'<tr><td>'+esc(a.created_at)+' UTC</td><td>'+esc(a.action)+'</td></tr>'))+'</section>';
  }
  if(tab==='overview'){
+  const tasks=openTasks(state.tasks||[],today()).slice(0,5);
+  if(tasks.length)view.innerHTML+='<section class="panel history"><div class="toolbar"><h2>Yapılacak işler</h2><button class="outline small" data-tab="tasks">Tümü</button></div>'+tasks.map(taskRow).join('')+'</section>';
   const pending=state.units.map(u=>({u,total:state.charges.filter(c=>c.unit_id===u.id).reduce((sum,c)=>sum+c.amount-c.paid,0)})).filter(x=>x.total>0);
   view.innerHTML+='<section class="panel history"><div class="toolbar"><h2>Ödeme bekleyenler</h2><span class="muted">Tüm dönemler · '+money(state.totals.receivable)+'</span></div>'+(pending.map(({u,total})=>'<button class="pending-row" data-action="unit-detail" data-id="'+u.id+'"><strong>'+esc(u.label)+'</strong><span>'+money(total)+' <span aria-hidden="true">›</span></span></button>').join('')||'<p class="empty">Bekleyen aidat borcu yok.</p>')+'</section>';
  }
@@ -104,15 +110,40 @@ function editExpense(expense){
   selectedMonth=values.date.slice(0,7);toast(editing?'Gider güncellendi.':'Gider kaydedildi. Fiş veya faturayı Belgeler bölümünden ekleyebilirsiniz.');
  });
 }
-function showExpenseFiles(expenseId){
- const expense=state.expenses.find(e=>e.id===expenseId);if(!expense)throw new Error('Gider bulunamadı.');
+function showExpenseFiles(expenseId){showDocumentFiles('expense',expenseId);}
+function showDocumentFiles(kind,id){
+ const expense=(kind==='decision'?state.decisions:state.expenses).find(e=>e.id===id);if(!expense)throw new Error('Gider bulunamadı.');
  const files=expense.files||[];
  const items=files.map(file=>'<article class="receipt"><strong>'+esc(file.file_name)+'</strong><small>'+ (file.uploaded?(file.shared?'Ortak ekranda görünüyor':'Yalnızca yönetici'):'Yükleme tamamlanmadı')+' · '+(file.bytes/1024/1024).toLocaleString('tr-TR',{maximumFractionDigits:1})+' MB</small><div class="actions">'+(file.uploaded?'<button type="button" class="outline small" data-action="open-file" data-file-id="'+file.id+'">Görüntüle</button>':'')+(state.admin?(file.uploaded?'<button type="button" class="outline small" data-action="file-visibility" data-file-id="'+file.id+'">'+(file.shared?'Ortak ekrandan gizle':'Ortak ekranda göster')+'</button>':'')+'<button type="button" class="danger small" data-action="remove-file" data-file-id="'+file.id+'">Kaldır</button>':'')+'</div></article>').join('');
- const uploader=state.admin&&files.length<5?'<div class="receipt-upload"><label for="receiptInput">Fiş / fatura seç</label><input id="receiptInput" type="file" accept="image/jpeg,image/png,image/webp,application/pdf"><p class="help">JPG, PNG, WEBP veya PDF · En fazla 10 MB. Yüklenen belgeyi önce yalnızca yönetici görür.</p><button type="button" class="primary" data-action="upload-file">Belgeyi yükle</button></div>':'';
- openReadDialog('Gider belgeleri','<p>'+esc(expense.description)+' · <strong>'+money(expense.amount)+'</strong></p>'+(items||'<p class="empty">Henüz belge yok.</p>')+uploader);
- documentExpenseId=expenseId;
+ const uploader=state.admin&&files.length<5?'<div class="receipt-upload"><label for="receiptInput">Belge seç</label><input id="receiptInput" type="file" accept="image/jpeg,image/png,image/webp,application/pdf"><p class="help">JPG, PNG, WEBP veya PDF · En fazla 10 MB. Yüklenen belgeyi önce yalnızca yönetici görür.</p><button type="button" class="primary" data-action="upload-file">Belgeyi yükle</button></div>':'';
+ openReadDialog(kind==='decision'?'Karar belgeleri':'Gider belgeleri','<p>'+esc(expense.title||expense.description)+(kind==='expense'?' · <strong>'+money(expense.amount)+'</strong>':'')+'</p>'+(items||'<p class="empty">Henüz belge yok.</p>')+uploader);
+ documentTarget={kind,id};
 }
-function currentFile(id){return state.expenses.flatMap(e=>e.files||[]).find(f=>f.id===id);}
+function currentFile(id){return [...state.expenses,...(state.decisions||[])].flatMap(e=>e.files||[]).find(f=>f.id===id);}
+function taskRow(t){
+ const late=t.status!=='done'&&t.due_date&&t.due_date<today();
+ return '<button class="pending-row" data-action="task-detail" data-id="'+t.id+'"><span><strong>'+esc(t.title)+'</strong><small class="ledger-period">'+esc(t.assignee||'Sorumlu belirtilmedi')+' · '+esc(statusName(t.status))+'</small></span><span class="'+(late?'overdue':'')+'">'+(t.due_date?(late?'Gecikti · ':t.due_date===today()?'Bugün · ':'')+dateName(t.due_date):'Tarih yok')+' ›</span></button>';
+}
+function workHTML(){
+ const decisions=tab==='decisions',kind=decisions?'decision':'task';
+ const rows=decisions?(state.decisions||[]).filter(d=>d.archived===decisionArchive):(workFilter==='open'?openTasks(state.tasks||[],today()):(state.tasks||[]).filter(t=>workFilter==='archive'?t.archived:!t.archived&&(workFilter==='all'||t.status==='done')));
+ const filter=decisions?'<label class="check"><input id="decisionArchive" type="checkbox" '+(decisionArchive?'checked':'')+'> Arşiv</label>':'<select id="workFilter" aria-label="İşleri filtrele">'+[['open','Bekleyen işler'],['done','Tamamlananlar'],['all','Tümü'],['archive','Arşiv']].map(([v,l])=>'<option value="'+v+'" '+(workFilter===v?'selected':'')+'>'+l+'</option>').join('')+'</select>';
+ return '<section class="panel"><div class="toolbar"><h2>'+(decisions?'Kararlar':'Yapılacak işler')+'</h2><div class="actions">'+filter+(state.admin?'<button class="primary" data-action="'+kind+'">'+(decisions?'Karar ekle':'İş ekle')+'</button>':'')+'</div></div>'+(rows.map(row=>'<article class="work-item">'+(decisions?'<button class="pending-row" data-action="decision-detail" data-id="'+row.id+'"><strong>'+esc(row.title)+'</strong><span>'+dateName(row.date)+' ›</span></button>':taskRow(row))+(state.admin?'<div class="actions">'+(!decisions&&!row.archived?'<button class="small outline" data-action="complete-task" data-id="'+row.id+'">'+(row.status==='done'?'Yeniden aç':'Tamamlandı işaretle')+'</button>':'')+'<button class="small outline" data-action="edit-'+kind+'" data-id="'+row.id+'">Düzenle</button><button class="small outline" data-action="archive-'+kind+'" data-id="'+row.id+'">'+(row.archived?'Arşivden çıkar':'Arşivle')+'</button></div>':'')+'</article>').join('')||'<p class="empty">Bu listede henüz kayıt yok.</p>')+'</section>';
+}
+function editWork(kind,row){
+ if(!state.admin)throw new Error('Yönetici girişi gerekli.');
+ const decision=kind==='decision';
+ const textArea=(name,label,value,max)=>'<label for="f-'+name+'">'+label+'</label><textarea id="f-'+name+'" name="'+name+'" rows="5" maxlength="'+max+'" '+(decision?'required':'')+'>'+esc(value)+'</textarea>';
+ let fields=input('title','Başlık','text',row?.title||'','required maxlength="150"');
+ if(decision)fields+=input('date','Karar tarihi','date',row?.date||today(),'required min="2000-01-01" max="2099-12-31"')+input('decisionNo','Karar numarası (isteğe bağlı)','text',row?.decision_no||'','maxlength="40"')+textArea('body','Karar metni',row?.body||'',4000);
+ else fields+=input('assignee','Sorumlu kişi','text',row?.assignee||'','maxlength="100"')+input('dueDate','Hedef tarih (isteğe bağlı)','date',row?.due_date||'','min="2000-01-01" max="2099-12-31"')+'<label for="f-status">Durum</label><select id="f-status" name="status">'+['pending','in_progress','done'].map(v=>'<option value="'+v+'" '+(v===(row?.status||'pending')?'selected':'')+'>'+statusName(v)+'</option>').join('')+'</select><label for="f-decisionId">İlgili karar (isteğe bağlı)</label><select id="f-decisionId" name="decisionId"><option value="">Seçilmeyen</option>'+state.decisions.filter(d=>!d.archived||d.id===row?.decision_id).map(d=>'<option value="'+d.id+'" '+(d.id===row?.decision_id?'selected':'')+'>'+esc(d.title)+'</option>').join('')+'</select>'+textArea('notes','Açıklama',row?.notes||'',2000);
+ openDialog((row?'Düzenle: ':'')+(decision?'Karar':'Yapılacak iş'),fields,async f=>{
+  const payload={operation:'save',...(row?{id:row.id,version:row.version}:{}),title:f.get('title')};
+  for(const name of decision?['date','decisionNo','body']:['assignee','dueDate','status','decisionId','notes'])payload[name]=f.get(name);
+  await api(decision?'decisions/manage':'tasks/manage','POST',payload);tab=decision?'decisions':'tasks';toast('Kayıt kaydedildi.');
+ });
+}
+
 function syncChargeSelection(){
  const eligible=unpaidCharges(state.charges.filter(c=>c.period===selectedMonth));
  const all=$('#selectAllCharges');if(!all)return;
@@ -155,7 +186,9 @@ $('#auth').addEventListener('click',async()=>{
  openDialog('Yönetici girişi',input('email','Yönetici e-postası','email','','required autocomplete="username"')+input('password','Yönetici şifresi','password','','required autocomplete="current-password" maxlength="1024"'),async f=>{await api('login','POST',{email:f.get('email'),password:f.get('password')});toast('Yönetici paneli açıldı.');},'Giriş yap');
 });
 document.addEventListener('change',e=>{
- if(e.target.id==='monthFilter'&&e.target.value){selectedMonth=e.target.value;selectedCharges.clear();render();}
+ if(e.target.id==='workFilter'){workFilter=e.target.value;render();}
+ else if(e.target.id==='decisionArchive'){decisionArchive=e.target.checked;render();}
+ else if(e.target.id==='monthFilter'&&e.target.value){selectedMonth=e.target.value;selectedCharges.clear();render();}
  else if(e.target.matches('[data-charge-select]')){const id=Number(e.target.dataset.chargeSelect);if(e.target.checked)selectedCharges.add(id);else selectedCharges.delete(id);syncChargeSelection();}
  else if(e.target.id==='selectAllCharges'){selectedCharges.clear();if(e.target.checked)for(const c of unpaidCharges(state.charges.filter(c=>c.period===selectedMonth)))selectedCharges.add(c.id);syncChargeSelection();}
 });
@@ -200,6 +233,13 @@ document.addEventListener('click',async e=>{
   if(action==='download-report')downloadText(text,reportContext?.kind==='unit'?'daire-'+reportContext.id+'-hesap-dokumu.txt':'apartman-'+selectedMonth+'-hesap-ozeti.txt');
   else{try{await navigator.clipboard.writeText(text);toast('Metin kopyalandı. WhatsApp’a yapıştırabilirsiniz.');}catch{openReadDialog('Paylaşılacak metin','<label for="reportText">Metni seçip kopyalayın</label><textarea id="reportText" readonly rows="12">'+esc(text)+'</textarea>');$('#reportText').focus();$('#reportText').select();}}
  }
+ else if(action==='decision'||action==='task'){editWork(action);}
+ else if(action==='edit-decision'||action==='edit-task'){const kind=action.slice(5);editWork(kind,(kind==='decision'?state.decisions:state.tasks).find(x=>x.id===id));}
+ else if(action==='decision-detail'){const d=state.decisions.find(x=>x.id===id);if(!d)throw new Error('Karar bulunamadı.');openReadDialog(d.title,'<p class="muted">'+dateName(d.date)+(d.decision_no?' · Karar no: '+esc(d.decision_no):'')+'</p><p class="work-body">'+esc(d.body)+'</p>'+((state.admin||(d.files||[]).length)?'<button type="button" class="outline" data-action="decision-files" data-id="'+d.id+'">Belgeler ('+(d.files||[]).length+')</button>':''));}
+ else if(action==='decision-files'){showDocumentFiles('decision',id);}
+ else if(action==='task-detail'){const t=state.tasks.find(x=>x.id===id);if(!t)throw new Error('İş bulunamadı.');const d=state.decisions.find(x=>x.id===t.decision_id);openReadDialog(t.title,'<p>'+esc(statusName(t.status))+' · '+esc(t.assignee||'Sorumlu belirtilmedi')+(t.due_date?' · '+dateName(t.due_date):'')+'</p><p class="work-body">'+esc(t.notes)+'</p>'+(d?'<button type="button" class="outline" data-action="decision-detail" data-id="'+d.id+'">İlgili karar: '+esc(d.title)+'</button>':''));}
+ else if(action==='complete-task'){const t=state.tasks.find(x=>x.id===id);btn.disabled=true;await api('tasks/manage','POST',taskSave(t,{status:t.status==='done'?'pending':'done'}));await refresh();toast('İşin durumu güncellendi.');}
+ else if(action==='archive-task'||action==='archive-decision'){const kind=action.slice(8),row=(kind==='task'?state.tasks:state.decisions).find(x=>x.id===id);btn.disabled=true;await api(kind==='task'?'tasks/manage':'decisions/manage','POST',{operation:'archive',id,version:row.version,archived:!row.archived});await refresh();toast(row.archived?'Kayıt arşivden çıkarıldı.':'Kayıt arşivlendi.');}
  else if(action==='show-notices'){tab='notices';render();}
  else if(action==='edit-charge'||action==='remove-charge')manageCharges(action==='edit-charge'?'edit':'delete',[id]);
  else if(action==='edit-selected-charges'||action==='remove-selected-charges')manageCharges(action==='edit-selected-charges'?'edit':'delete',[...selectedCharges]);
@@ -225,14 +265,14 @@ document.addEventListener('click',async e=>{
  showExpenseFiles(id);
  }else if(action==='upload-file'){
  if(uploadingDocument)return;
- const expenseId=documentExpenseId,file=$('#receiptInput')?.files[0];
+ const target={...documentTarget},file=$('#receiptInput')?.files[0];
  uploadingDocument=true;$('#closeModal').disabled=true;btn.disabled=true;btn.textContent='Yükleniyor…';$('#dialogError').textContent='';
- try{await uploadReceipt(api,expenseId,file);await refresh();showExpenseFiles(expenseId);toast('Belge eklendi.');}
- catch(err){try{await refresh();showExpenseFiles(expenseId);}catch{}$('#dialogError').textContent=err.message;}
+ try{await uploadReceipt(api,target.id,file,target.kind);await refresh();showDocumentFiles(target.kind,target.id);toast('Belge eklendi.');}
+ catch(err){try{await refresh();showDocumentFiles(target.kind,target.id);}catch{}$('#dialogError').textContent=err.message;}
  finally{uploadingDocument=false;$('#closeModal').disabled=false;btn.disabled=false;btn.textContent='Belgeyi yükle';}
  }else if(['open-file','file-visibility','remove-file'].includes(action)){
  const file=currentFile(btn.dataset.fileId);if(!file)throw new Error('Belge bulunamadı. Listeyi yenileyin.');
- const expenseId=documentExpenseId;
+ const target={...documentTarget};
  if(action==='open-file'){
   btn.disabled=true;
   try{
@@ -241,13 +281,13 @@ document.addEventListener('click',async e=>{
    if(btn.nextElementSibling?.matches('a'))btn.nextElementSibling.remove();btn.after(link);btn.textContent='Bağlantıyı yenile';link.click();
   }finally{btn.disabled=false;}
  }else{
-  if(action==='remove-file'&&!confirm('Bu belge kaldırılsın mı? Gider kaydı korunacak.'))return;
+  if(action==='remove-file'&&!confirm('Bu belge kaldırılsın mı?'))return;
   if(action==='file-visibility'&&!file.shared&&!confirm('Bu belge ortak ekranda herkese açılacak. Kişisel bilgileri kontrol ettiniz mi?'))return;
   btn.disabled=true;
   try{
    if(action==='remove-file')await removeReceipt(api,file);
    else await api('expenses/manage','POST',{operation:'visibility',fileId:file.id,shared:!file.shared});
-   await refresh();showExpenseFiles(expenseId);toast(action==='remove-file'?'Belge kaldırıldı.':'Belge görünürlüğü güncellendi.');
+   await refresh();showDocumentFiles(target.kind,target.id);toast(action==='remove-file'?'Belge kaldırıldı.':'Belge görünürlüğü güncellendi.');
   }catch(err){$('#dialogError').textContent=err.message;btn.disabled=false;}
  }
  }else if(action==='notice'){
