@@ -1,15 +1,15 @@
-import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from './payment-notices.js?v=notice-1';
-import { unitPaymentPlan } from './unit-payments.js?v=notice-1';
-import { initPwa } from './pwa.js?v=notice-1';
-import { filterUnits } from './dues-filters.js?v=notice-1';
-import { changeInfo } from './history.js?v=notice-1';
-import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=notice-1';
-import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=notice-1';
-import { openTasks, taskSave, statusName } from './work.js?v=notice-1';
-import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=notice-1';
-import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=notice-1';
+import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from './payment-notices.js?v=notice-2';
+import { unitPaymentPlan } from './unit-payments.js?v=notice-2';
+import { initPwa } from './pwa.js?v=notice-2';
+import { filterUnits } from './dues-filters.js?v=notice-2';
+import { changeInfo } from './history.js?v=notice-2';
+import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=notice-2';
+import { normalizeIban, formatIban, reminderText } from './payment-tools.js?v=notice-2';
+import { openTasks, taskSave, statusName } from './work.js?v=notice-2';
+import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=notice-2';
+import { monthReport, monthReportText, unitStatement, unitStatementText } from './reports.js?v=notice-2';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=notice-1';
+import { createApi } from './transport.js?v=notice-2';
 import { config } from './config.js';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
@@ -123,7 +123,7 @@ function openPaymentNotice(unitId){
   const file=$('#f-receipt').files?.[0],payload=noticePayload({requestId,unitId:Number(f.get('unitId')),amount:f.get('amount'),date:f.get('date'),note:f.get('note')||'',file},today());
   if(frozen&&JSON.stringify(frozen)!==JSON.stringify(payload))throw new Error('İlk gönderimin sonucu belirsiz olabilir. Bilgileri değiştirmeden tekrar deneyin veya yöneticiyle kontrol edin.');
   frozen=payload;uploadingDocument=true;
-  try{createdNoticeAcknowledgement=await sendPaymentNotice(api,payload,file);toast('Ödeme bildirimi gönderildi.');}finally{uploadingDocument=false;}
+  try{createdNoticeAcknowledgement=await sendPaymentNotice(api,payload,file);toast('Ödeme bildirimi gönderildi.');}catch(error){if(error.noticeSubmissionRejected)frozen=null;throw error;}finally{uploadingDocument=false;}
  },'Bildirimi gönder');
 }
 function showNoticeAcknowledgement(result){
