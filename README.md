@@ -211,3 +211,11 @@ Yöneticiye gelen yeni arıza bildirimleri yalnızca kayıt UUID’sini içeren 
 Oturum `komsu-apartman-session-v1` anahtarıyla localStorage içinde saklanır; mevcut tab oturumu bir kez taşınıp sessionStorage’dan kaldırılır. Şifre saklanmaz. Depolama kapalıysa tab/bellek oturumuna dönülür. Her istekte güncel oturum okunur; destekleyen tarayıcılarda Web Locks ile farklı sekmelerin refresh-token yenilemesi ve çıkışı sıraya alınır. Açık sekmeler storage olayıyla güncellenir. Supabase yenileme/üyelik kontrolleri korunur; Çıkış yap bu cihazın apartman oturumunu kaldırır. Başka sitede açılan Acısu oturumuna dokunulmaz.
 
 Bu düzeltmede 90 Node testi geçti; `verify-admin-request-push-link.sql` kayıt UUID’sinin yönetici işine eklendiğini, sakin takip anahtarının eklenmediğini ve yetkisiz worker/liste erişiminin engellendiğini ROLLBACK ile doğruladı.
+
+## Kararlarda “Okudum” bildirimi
+
+Kararlar → karar ayrıntısı → **Okudum bildir** üzerinden daire/dükkân seçilir ve beyan kutusu işaretlenir. Ortak ekranda yalnızca toplam bildirim sayısı, yönetici ekranında bölüm bazında bildirenler, tarihler ve bekleyenler görünür. Daire seçimi kimlik doğrulaması, oylama veya hukuki onay değildir. Tüm kayıtlı bölümler sayılır; muafiyet bu sayımı etkilemez.
+
+Aynı bölümün aynı karar sürümüne tekrar bildirimi sayıyı veya ilk bildirim tarihini değiştirmez. Karar güncellenirse eski sürümün bildirimleri güncel sayıya eklenmez; arşivde yeni bildirim alınmaz. Yönetici yanlış bildirimi, güncel kayıt önizlemesiyle kaldırabilir. `apartman_private.decision_reads` doğrudan erişime kapalıdır; RLS/no-policy advisor bilgi notu bu RPC tasarımında beklenir. Yönetici JSON yedeğinde `decisionReads` bulunur. Finansal kayıtlar değişmez.
+
+CLI ile oluşturulan `20261022181202_decision_read_receipts.sql` ve `20261022181806_decision_read_backup.sql` uygulanmıştır. `verify-decision-read-receipts.sql` sentetik kayıtlarla tekrar, sürüm değişimi, arşiv, yönetici yetkisi, stale kaldırma, özel tablo erişimi, yedek ve finansal toplamları ROLLBACK içinde doğrular. Sözdizimi kontrolleri ve 93 Node testi geçti.
