@@ -66,6 +66,21 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       return {ok:true};
     }
     if(path==='logout')return logout();
+    if(path.startsWith('notice-files/')){
+      const objectPath=data?.path,bucket='apartman-payment-notices';
+      if(typeof objectPath!=='string'||!(/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp|pdf)$/).test(objectPath))throw new Error('Geçersiz dekont yolu.');
+      if(path==='notice-files/upload'&&method==='POST')return storageRequest('object/'+bucket+'/'+objectPath,'POST',data.file,data.file.type);
+      if(path==='notice-files/sign'&&method==='POST'){
+        const result=await storageRequest('object/sign/'+bucket+'/'+objectPath,'POST',{expiresIn:60});
+        if(typeof result.signedURL!=='string'||!result.signedURL.startsWith('/object/sign/'+bucket+'/'))throw new Error('Dekont bağlantısı oluşturulamadı.');
+        return {url:url+'/storage/v1'+result.signedURL};
+      }
+      throw new Error('Geçersiz dekont işlemi.');
+    }
+    if(path==='payment-notices')return rpc('apartman_notice_list',{});
+    if(path==='payment-notices/submit'&&method==='POST')return rpc('apartman_notice_submit',{payload:data});
+    if(path==='payment-notices/complete'&&method==='POST')return rpc('apartman_notice_complete',{payload:data});
+    if(path==='payment-notices/review'&&method==='POST')return rpc('apartman_notice_review',{payload:data});
     if(path.startsWith('files/')){
       const objectPath=data?.path;
       if(typeof objectPath!=='string'||!/^(?:decisions\/)?\d+\/[0-9a-f-]{36}\.(jpg|png|webp|pdf)$/.test(objectPath))throw new Error('Geçersiz belge yolu.');
