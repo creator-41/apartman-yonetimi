@@ -36,6 +36,15 @@ export function unitStatement(state,unitId){
 const money=v=>new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(v/100);
 const monthLabel=m=>new Date(m+'-15T12:00:00').toLocaleDateString('tr-TR',{year:'numeric',month:'long'});
 const dateLabel=d=>new Date(d+'T12:00:00').toLocaleDateString('tr-TR');
+export function monthSummaryText(state,month,page){
+ const r=monthReport(state,month),link=new URL('./',page);
+ // Share only aggregate figures; never copy unit balances, notes or tracking tokens.
+ return [state.settings.name,monthLabel(month)+' · Aylık özet','',
+ 'Tahsilat: '+money(r.income),'Toplam gider: '+money(r.spent),'',
+ 'Harcama özeti',...(r.categories.length?r.categories.map(c=>'• '+c.category+': '+money(c.amount)):['Bu ay harcama yok.']),'',
+ 'Güncel kasa: '+money(state.totals.cash),'Toplam kalan aidat (tüm dönemler): '+money(state.totals.receivable),'',
+ 'Ayrıntılar: '+link.href].join('\n');
+}
 export function monthReportText(state,month){
  const r=monthReport(state,month);
  return [state.settings.name,monthLabel(month)+' · Aylık bilanço','',
