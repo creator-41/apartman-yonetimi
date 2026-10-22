@@ -1,0 +1,76 @@
+begin;
+select set_config('test.admin',(select user_id::text from public.apartman_admins order by created_at limit 1),true);
+select set_config('test.unit',(select id::text from public.apartman_units order by id limit 1),true);
+select set_config('test.totals',(public.apartman_state()->'totals')::text,true);
+set local role anon;
+select set_config('request.jwt.claim.sub','',true);
+do $test$
+declare p jsonb;r jsonb;again jsonb;id uuid:=gen_random_uuid();id2 uuid:=gen_random_uuid();id3 uuid:=gen_random_uuid();failed bool;
+begin
+ p:=jsonb_build_object('requestId',id,'unitId',current_setting('test.unit')::int,'title','TEST_PRIVATE_TITLE','body','TEST_PRIVATE_BODY: Merdiven lambası arızası.','location','TEST_PRIVATE_LOCATION');
+ r:=public.apartman_request_submit(p);again:=public.apartman_request_submit(p);
+ if again->>'id'<>r->>'id' or again->>'token'<>r->>'token' or again->>'replayed'<>'true' then raise exception 'Retry duplicate';end if;
+ perform set_config('test.request',id::text,true);perform set_config('test.token',r->>'token',true);
+ if public.apartman_request_track(jsonb_build_object('id',id,'token',r->>'token'))->>'status'<>'received' then raise exception 'New request status wrong';end if;
+ failed:=false;begin perform public.apartman_request_track(jsonb_build_object('id',id,'token',gen_random_uuid()));exception when others then failed:=true;end;if not failed then raise exception 'Wrong tracking token accepted';end if;
+ failed:=false;begin perform public.apartman_request_submit(p||jsonb_build_object('body','CHANGED TEST BODY'));exception when others then failed:=true;end;if not failed then raise exception 'Changed retry accepted';end if;
+ failed:=false;begin perform public.apartman_request_submit(p||jsonb_build_object('requestId',id2,'title','x'));exception when others then failed:=true;end;if not failed then raise exception 'Invalid title accepted';end if;
+ failed:=false;begin perform public.apartman_request_submit(p||jsonb_build_object('requestId',id2,'file',jsonb_build_object('fileName','x.pdf','mimeType','application/pdf','bytes',120)));exception when others then failed:=true;end;if not failed then raise exception 'Non-photo accepted';end if;
+ failed:=false;begin perform public.apartman_request_submit(p||jsonb_build_object('requestId',id2,'file',jsonb_build_object('fileName','x.png','mimeType','image/png','bytes',5242881)));exception when others then failed:=true;end;if not failed then raise exception 'Oversize photo accepted';end if;
+ r:=public.apartman_request_submit(p||jsonb_build_object('requestId',id2,'file',jsonb_build_object('fileName','TEST_PHOTO.png','mimeType','image/png','bytes',120)));
+ perform set_config('test.photo_request',id2::text,true);perform set_config('test.photo_token',r->>'token',true);perform set_config('test.photo_path',r->>'path',true);
+ failed:=false;begin perform public.apartman_request_complete(jsonb_build_object('id',id2,'token',r->>'token'));exception when others then failed:=true;end;if not failed then raise exception 'Missing photo completed';end if;
+ if apartman_private.request_file_access(r->>'path','read') or not apartman_private.request_file_access(r->>'path','upload') then raise exception 'Photo access wrong';end if;
+ r:=public.apartman_request_track(jsonb_build_object('id',id2,'token',r->>'token'));
+ if r?'path' or r?'file_name' or r?'access_token' then raise exception 'Tracking leaked photo path';end if;
+ perform public.apartman_request_submit(p||jsonb_build_object('requestId',id3));
+ failed:=false;begin perform public.apartman_request_submit(p||jsonb_build_object('requestId',gen_random_uuid()));exception when others then failed:=true;end;if not failed then raise exception 'Unit daily limit bypassed';end if;
+ if public.apartman_state()::text like '%TEST_PRIVATE_%' then raise exception 'Private request leaked into state';end if;
+ if has_function_privilege('anon','public.apartman_request_list()','execute') or has_function_privilege('anon','public.apartman_request_manage(jsonb)','execute') or has_table_privilege('anon','public.apartman_requests','select') then raise exception 'Anon private access';end if;
+end;$test$;
+insert into storage.objects(bucket_id,name,metadata) values('apartman-request-photos',current_setting('test.photo_path'),'{"size":120,"mimetype":"image/png"}');
+do $test$ declare failed bool;begin
+ if exists(select 1 from storage.objects where bucket_id='apartman-request-photos') then raise exception 'Anon photo read allowed';end if;
+ failed:=false;begin insert into storage.objects(bucket_id,name,metadata) values('apartman-request-photos',gen_random_uuid()::text||'/'||gen_random_uuid()::text||'.png','{}');exception when insufficient_privilege then failed:=true;end;if not failed then raise exception 'Unreserved upload allowed';end if;
+ perform public.apartman_request_complete(jsonb_build_object('id',current_setting('test.photo_request'),'token',current_setting('test.photo_token')));
+ if apartman_private.request_file_access(current_setting('test.photo_path'),'upload') then raise exception 'Final photo still writable';end if;
+end;$test$;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',true);
+do $test$ declare failed bool;begin
+ failed:=false;begin perform public.apartman_request_list();exception when insufficient_privilege then failed:=true;end;if not failed then raise exception 'Nonadmin list allowed';end if;
+ failed:=false;begin perform public.apartman_request_manage(jsonb_build_object('id',current_setting('test.request'),'operation','status','status','done'));exception when insufficient_privilege then failed:=true;end;if not failed then raise exception 'Nonadmin status allowed';end if;
+ if apartman_private.request_file_access(current_setting('test.photo_path'),'read') then raise exception 'Nonadmin photo read allowed';end if;
+end;$test$;
+select set_config('request.jwt.claim.sub',current_setting('test.admin'),true);
+do $test$
+declare r jsonb;p jsonb;result jsonb;task jsonb;first_version text;task_id int;failed bool;
+begin
+ select x into r from jsonb_array_elements(public.apartman_request_list())x where x->>'id'=current_setting('test.request');
+ if r is null or r?'access_token' then raise exception 'Admin list wrong';end if;
+ first_version:=r->>'version';
+ p:=jsonb_build_object('id',r->'id','version',r->'version','operation','status','status','in_progress','reply','TEST_REPLY: Elektrikçi çağrıldı.');
+ perform public.apartman_request_manage(p);
+ if public.apartman_request_track(jsonb_build_object('id',current_setting('test.request'),'token',current_setting('test.token')))->>'status'<>'in_progress' then raise exception 'Tracking status not updated';end if;
+ failed:=false;begin perform public.apartman_request_manage(p);exception when others then failed:=true;end;if not failed then raise exception 'Stale status accepted';end if;
+ select x into r from jsonb_array_elements(public.apartman_request_list())x where x->>'id'=current_setting('test.request');
+ p:=jsonb_build_object('id',r->'id','version',r->'version','operation','task','title','TEST_PUBLIC_TASK','notes','TEST_PUBLIC_REVIEWED_NOTES','confirmed',true);
+ failed:=false;begin perform public.apartman_request_manage(p||jsonb_build_object('confirmed',false));exception when others then failed:=true;end;if not failed then raise exception 'Task privacy confirmation bypassed';end if;
+ result:=public.apartman_request_manage(p);task_id:=(result->>'id')::int;
+ result:=public.apartman_request_manage(p);if result->>'replayed'<>'true' or (result->>'id')::int<>task_id then raise exception 'Task conversion duplicated';end if;
+ if public.apartman_state()::text like '%TEST_PRIVATE_%' then raise exception 'Private fields leaked on conversion';end if;
+ select x into task from jsonb_array_elements(public.apartman_state()->'tasks')x where (x->>'id')::int=task_id;
+ select x into r from jsonb_array_elements(public.apartman_request_list())x where x->>'id'=current_setting('test.request');
+ perform public.apartman_work_manage('task',jsonb_build_object('operation','save','id',task_id,'version',task->'version','title',task->'title','notes',task->'notes','assignee',task->'assignee','status','done'));
+ if public.apartman_request_track(jsonb_build_object('id',current_setting('test.request'),'token',current_setting('test.token')))->>'status'<>'done' then raise exception 'Task completion not reflected in tracking';end if;
+ failed:=false;begin perform public.apartman_request_manage(jsonb_build_object('id',r->'id','version',r->'version','taskVersion',r->'task_version','operation','status','status','received'));exception when others then failed:=true;end;if not failed then raise exception 'Stale linked task accepted';end if;
+ select x into r from jsonb_array_elements(public.apartman_request_list())x where x->>'id'=current_setting('test.request');
+ perform public.apartman_request_manage(jsonb_build_object('id',r->'id','version',r->'version','taskVersion',r->'task_version','operation','status','status','received','reply','Yeniden açıldı.'));
+ select x into task from jsonb_array_elements(public.apartman_state()->'tasks')x where (x->>'id')::int=task_id;
+ if task->>'status'<>'pending' then raise exception 'Request status not reflected in task';end if;
+ if not apartman_private.request_file_access(current_setting('test.photo_path'),'read') then raise exception 'Admin photo unavailable';end if;
+ if not(public.apartman_backup()->'tables'?'residentRequests') or not(public.apartman_backup()->'tables'?'paymentNotices') then raise exception 'Backup fields missing';end if;
+ if public.apartman_state()->'totals'<>current_setting('test.totals')::jsonb then raise exception 'Request actions changed finance';end if;
+end;$test$;
+select 'PASS: resident requests, private photos, tracking, limits, stale protection, task conversion/sync, backup; rolled back' as result;
+rollback;

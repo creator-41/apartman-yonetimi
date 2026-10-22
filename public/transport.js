@@ -66,6 +66,19 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       return {ok:true};
     }
     if(path==='logout')return logout();
+    if(path.startsWith('request-files/')){
+      const objectPath=data?.path,bucket='apartman-request-photos';
+      if(typeof objectPath!=='string'||!(/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp)$/).test(objectPath))throw new Error('Geçersiz fotoğraf yolu.');
+      if(path==='request-files/upload'&&method==='POST')return storageRequest('object/'+bucket+'/'+objectPath,'POST',data.file,data.file.type);
+      if(path==='request-files/sign'&&method==='POST'){
+        const result=await storageRequest('object/sign/'+bucket+'/'+objectPath,'POST',{expiresIn:60});
+        if(typeof result.signedURL!=='string'||!result.signedURL.startsWith('/object/sign/'+bucket+'/'))throw new Error('Fotoğraf bağlantısı oluşturulamadı.');
+        return {url:url+'/storage/v1'+result.signedURL};
+      }
+      throw new Error('Geçersiz fotoğraf işlemi.');
+    }
+    if(path==='requests')return rpc('apartman_request_list',{});
+    if(['submit','complete','track','manage'].includes(path.split('/')[1])&&path.startsWith('requests/')&&method==='POST')return rpc('apartman_request_'+path.split('/')[1],{payload:data});
     if(path.startsWith('notice-files/')){
       const objectPath=data?.path,bucket='apartman-payment-notices';
       if(typeof objectPath!=='string'||!(/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp|pdf)$/).test(objectPath))throw new Error('Geçersiz dekont yolu.');

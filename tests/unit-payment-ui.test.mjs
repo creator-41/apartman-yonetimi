@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { unitPaymentPlan } from '../public/unit-payments.js';
 import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from '../public/payment-notices.js';
+import {requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange} from '../public/requests.js';
 
 async function fixture(apiImpl){
  const elements=new Map(),requests=[];
@@ -11,11 +12,11 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> 'test-stable-request'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
- source=source.replace(/^import .*;\n/gm,'').replace(/^refresh\(\)\.catch\(error\);$/m,'');
+ source=source.replace(/^import .*;\n/gm,'').replace(/^refresh\(\)\.(?:then|catch).*$/m,'');
  vm.runInContext(source,context);
  vm.runInContext(`state={admin:true,units:[{id:1,label:'Daire 1'}],charges:[{id:2,unit_id:1,period:'2026-02',amount:10000,paid:0},{id:1,unit_id:1,period:'2026-01',amount:10000,paid:2500}],payments:[]};`,context);
  return {context,element,requests,run:code=>vm.runInContext(code,context)};
@@ -79,4 +80,26 @@ test('resident can correct a server-rejected notice while an uncertain network w
  const uncertain=await fixture(async()=>{throw new Error('network disconnected');});uncertain.run('state.admin=false;openPaymentNotice(1)');uncertain.context.form=new Map([['unitId','1'],['amount','1'],['date','2026-01-01']]);
  await assert.rejects(()=>uncertain.run('dialogAction(form)'),/network disconnected/);
  uncertain.context.form.set('amount','2');await assert.rejects(()=>uncertain.run('dialogAction(form)'),/Bilgileri değiştirmeden/);assert.equal(uncertain.requests.length,1);
+});
+
+test('resident request form submits private text and allows correcting definite rejections',async()=>{
+ let count=0;const f=await fixture(async()=>{if(count++===0)throw Object.assign(new Error('rejected'),{status:400,code:'P0001'});return {id:'test',token:'token',path:null};});
+ f.run('state.admin=false;openResidentRequest()');assert.match(f.element('#dialogFields').innerHTML,/yönetime özeldir/);
+ f.context.form=new Map([['unitId','1'],['title','Lamba arızası'],['body','Merdivendeki lamba yanmıyor.']]);
+ await assert.rejects(()=>f.run('dialogAction(form)'),/rejected/);f.context.form.set('title','Lamba onarımı');await f.run('dialogAction(form)');
+ assert.equal(f.requests[0][0],'requests/submit');assert.equal(f.requests[0][2].requestId,f.requests[1][2].requestId);
+});
+test('task conversion previews public fields without copying private complaint or photo',async()=>{
+ const f=await fixture();f.run(`residentRequests=[{id:'req',unit_id:1,title:'Lamba',body:'SECRET_ISSUE_BODY',location:'SECRET_LOCATION',status:'received',reply:'',version:'r1',task_version:null,task_id:null,has_photo:true,uploaded:true,path:'SECRET_PHOTO'}];createRequestTask('req')`);
+ const html=f.element('#dialogFields').innerHTML;assert.match(html,/ortak ekranda/);assert.match(html,/name="confirmed" required/);assert.doesNotMatch(html,/SECRET_/);
+ f.context.form=new Map([['title','Lamba onarımı'],['notes','Ortak açıklama'],['confirmed','on']]);await f.run('dialogAction(form)');
+ const call=f.requests[0];assert.equal(call[0],'requests/manage');assert.equal(call[2].operation,'task');assert.equal(call[2].confirmed,true);assert.equal(call[2].version,'r1');
+ f.run('state.admin=false');assert.throws(()=>f.run("showRequestDetail('req')"),/Yönetici/);assert.equal(f.run('requestQueueCard()'),'');
+});
+test('own tracking escapes complaint/reply and updates carry both stale guards',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',token='22222222-2222-4222-8222-222222222222';
+ const f=await fixture(async()=>({id,title:'<title>',body:'<script>private</script>',reply:'<img>',status:'in_progress',created_at:'2026-10-22T00:00:00Z',location:'',has_photo:true,uploaded:true}));
+ f.context.access={id,token};await f.run('showOwnRequest(access)');assert.match(f.element('#dialogFields').innerHTML,/&lt;script&gt;/);assert.match(f.element('#dialogFields').innerHTML,/Yapılıyor/);assert.doesNotMatch(f.element('#dialogFields').innerHTML,/<script>/);
+ f.run(`residentRequests=[{id:'req',unit_id:1,title:'Lamba',status:'in_progress',reply:'',version:'r1',task_version:'t1'}];editRequestStatus('req')`);
+ f.context.form=new Map([['status','done'],['reply','Onarıldı']]);await f.run('dialogAction(form)');const call=f.requests[1];assert.equal(call[2].taskVersion,'t1');assert.equal(call[2].version,'r1');assert.equal(call[2].status,'done');
 });
