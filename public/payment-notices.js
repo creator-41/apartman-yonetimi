@@ -15,7 +15,13 @@ export function noticePayload({requestId,unitId,amount,date,note='',file},today)
 }
 // A retry reuses the reservation and finishes an upload whose response may have been lost.
 export async function sendPaymentNotice(api,payload,file){
- const result=await api('payment-notices/submit','POST',payload);
+ let result;
+ try{result=await api('payment-notices/submit','POST',payload);}
+ catch(error){
+  // A Postgres validation exception aborts the RPC transaction: no claim was inserted.
+  error.noticeSubmissionRejected=error.status===400&&error.code==='P0001';
+  throw error;
+ }
  if(result.status!=='uploading')return result;
  let uploadError;
  try{await api('notice-files/upload','POST',{path:result.path,file});}catch(error){uploadError=error;}

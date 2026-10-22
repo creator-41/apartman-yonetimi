@@ -39,3 +39,12 @@ test('notice RPCs and dedicated private bucket routes do not use expense or paym
  const link=await api('notice-files/sign','POST',{path});assert.ok(link.url.startsWith('https://example.supabase.co/storage/v1/object/sign/apartman-payment-notices/'));
  await assert.rejects(()=>api('notice-files/upload','POST',{path:'../private.pdf',file}),/Geçersiz/);
 });
+
+test('only explicit Postgres submission rejection permits correcting the frozen form',async()=>{
+ const api=createApi({url:'https://example.supabase.co',key:'public-key',fetchImpl:async()=>({ok:false,status:400,json:async()=>({code:'P0001',message:'too much'})})});
+ await assert.rejects(()=>sendPaymentNotice(api,noticePayload(values,day)),error=>error.noticeSubmissionRejected===true&&error.code==='P0001'&&error.status===400);
+ for(const attributes of [{status:500,code:'P0001'},{status:400},{}, {status:400,code:'PGRST000'}]){
+  await assert.rejects(()=>sendPaymentNotice(async()=>{throw Object.assign(new Error('unknown'),attributes);},noticePayload(values,day)),error=>error.noticeSubmissionRejected===false);
+ }
+ await assert.rejects(()=>sendPaymentNotice(async path=>{if(path.endsWith('/submit'))return {id,token,status:'uploading',path:id+'/'+token+'.pdf'};throw Object.assign(new Error('file incomplete'),{status:400,code:'P0001'});},noticePayload({...values,file},day),file),error=>!error.noticeSubmissionRejected);
+});

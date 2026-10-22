@@ -11,7 +11,7 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
     const result=await response.json().catch(()=>({}));
     if(!response.ok){
       const message=result.error_description||result.msg||result.message||result.error||'Bağlantı hatası.';
-      const error=new Error(typeof message==='string'?message:'İşlem tamamlanamadı.');error.status=response.status;throw error;
+      const error=new Error(typeof message==='string'?message:'İşlem tamamlanamadı.');error.status=response.status;error.code=result.code;throw error;
     }
     return result;
   }

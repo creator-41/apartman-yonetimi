@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { unitPaymentPlan } from '../public/unit-payments.js';
 import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from '../public/payment-notices.js';
 
-async function fixture(){
+async function fixture(apiImpl){
  const elements=new Map(),requests=[];
  const element=selector=>{
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
@@ -13,7 +13,7 @@ async function fixture(){
  };
  const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> 'test-stable-request'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}},
-  config:{},createApi:()=>async(...args)=>{requests.push(args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
+  config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
  source=source.replace(/^import .*;\n/gm,'').replace(/^refresh\(\)\.catch\(error\);$/m,'');
  vm.runInContext(source,context);
@@ -67,4 +67,16 @@ test('admin notice review previews allocation, requires bank confirmation and es
  assert.equal(f.requests[1][2].operation,'reject');assert.equal(f.requests[1][2].expected,undefined);
  f.run('state.admin=false');assert.throws(()=>f.run("showNoticeDetail('notice-1')"),/Yönetici girişi/);
  assert.equal(f.run('noticeQueueCard()'),'');
+});
+
+test('resident can correct a server-rejected notice while an uncertain network write stays frozen',async()=>{
+ let attempt=0;
+ const f=await fixture(async()=>{if(attempt++===0)throw Object.assign(new Error('borcu aşıyor'),{status:400,code:'P0001'});return {id:'test',status:'pending'};});
+ f.run('state.admin=false;openPaymentNotice(1)');f.context.form=new Map([['unitId','1'],['amount','351'],['date','2026-01-01']]);
+ await assert.rejects(()=>f.run('dialogAction(form)'),/borcu aşıyor/);
+ f.context.form.set('amount','1');await f.run('dialogAction(form)');
+ assert.equal(f.requests.length,2);assert.equal(f.requests[1][2].amount,1);assert.equal(f.requests[0][2].requestId,f.requests[1][2].requestId);
+ const uncertain=await fixture(async()=>{throw new Error('network disconnected');});uncertain.run('state.admin=false;openPaymentNotice(1)');uncertain.context.form=new Map([['unitId','1'],['amount','1'],['date','2026-01-01']]);
+ await assert.rejects(()=>uncertain.run('dialogAction(form)'),/network disconnected/);
+ uncertain.context.form.set('amount','2');await assert.rejects(()=>uncertain.run('dialogAction(form)'),/Bilgileri değiştirmeden/);assert.equal(uncertain.requests.length,1);
 });
