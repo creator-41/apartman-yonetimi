@@ -603,3 +603,7 @@ window.addEventListener?.('storage',event=>{if(event.key===SESSION_KEY){$('#moda
 window.addEventListener?.('hashchange',()=>{followNotification().catch(error);});
 setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&!$('#settingsForm')&&!$('#bankForm'))refresh().catch(error);},60000);
 
+
+// iOS may ignore viewport zoom limits. Block only zoom gestures, preserving one-finger scrolling.
+for(const type of ['gesturestart','gesturechange'])document.addEventListener(type,event=>event.preventDefault(),{passive:false});
+document.addEventListener('touchmove',event=>{if(event.touches.length>1)event.preventDefault();},{passive:false});
