@@ -34,3 +34,5 @@ progress{width:100%;height:12px;accent-color:var(--green);margin:16px 0;border:0
 .summary-cards .arrears{grid-column:auto}
 
 #unitPaymentPreview{padding:12px;background:var(--cream);border-radius:10px;margin-top:12px}#unitPaymentPreview td,#unitPaymentPreview th{padding:8px 6px}.statement-payments>.primary{width:100%;margin-bottom:14px}.change-item .toolbar{gap:8px}
+
+.notice-queue{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.notice-queue h3,.notice-queue p{margin:0}.notice-note{white-space:pre-wrap;overflow-wrap:anywhere}
