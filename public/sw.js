@@ -3,6 +3,14 @@ const CACHE='komsu-apartman-offline-v1';
 const ROOT=new URL('./',self.location.href);
 const OFFLINE=new URL('offline.html',ROOT).href;
 const ASSETS=[OFFLINE,new URL('offline.css',ROOT).href];
+function notificationUrl(value){
+ try{
+  const candidate=new URL(value,ROOT);
+  if(candidate.origin===ROOT.origin&&candidate.pathname===ROOT.pathname&&!candidate.search&&
+    (!candidate.hash||/^#talep=[0-9a-f-]{36}\.[0-9a-f-]{36}$/.test(candidate.hash)||/^#yonetim-talep=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate.hash)))return candidate.href;
+ }catch{}
+ return ROOT.href;
+}
 self.addEventListener('install',event=>{
  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
 });
@@ -18,8 +26,7 @@ self.addEventListener('fetch',event=>{
 self.addEventListener('push',event=>{
  let message={};try{message=event.data?.json()||{};}catch{/* Always display a visible, generic notification. */}
  const root=new URL('./',self.location.href);
- let url=root.href;
- try{const candidate=new URL(message.url,root);if(candidate.origin===root.origin&&candidate.pathname===root.pathname&&(!candidate.hash||/^#talep=[0-9a-f-]{36}\.[0-9a-f-]{36}$/.test(candidate.hash))&&!candidate.search)url=candidate.href;}catch{}
+ const url=notificationUrl(message.url);
  event.waitUntil(self.registration.showNotification('Komşu',{
   body:typeof message.body==='string'?message.body.slice(0,160):'Apartman ekranında yeni bir gelişme var.',
   icon:new URL('icons/icon-192.png',root).href,badge:new URL('icons/icon-192.png',root).href,
@@ -28,8 +35,12 @@ self.addEventListener('push',event=>{
 });
 self.addEventListener('notificationclick',event=>{
  event.notification.close();
- const root=new URL('./',self.location.href);let url=root.href;
- try{const candidate=new URL(event.notification.data?.url,root);if(candidate.origin===root.origin&&candidate.pathname===root.pathname&&!candidate.search&&(!candidate.hash||/^#talep=[0-9a-f-]{36}\.[0-9a-f-]{36}$/.test(candidate.hash)))url=candidate.href;}catch{}
- // A new app window processes the private tracking fragment through the normal guarded RPC.
- event.waitUntil(self.clients.openWindow(url));
+ const url=notificationUrl(event.notification.data?.url);
+ event.waitUntil((async()=>{
+  // Reuse this app's window so its tab-scoped administrator session is preserved.
+  const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});
+  const existing=windows.find(client=>{try{const u=new URL(client.url);return u.origin===ROOT.origin&&u.pathname===ROOT.pathname;}catch{return false;}});
+  if(existing){try{const navigated=await existing.navigate(url);if(navigated)return await navigated.focus();}catch{/* Window closed; fall back to a new one. */}}
+  return self.clients.openWindow(url);
+ })());
 });

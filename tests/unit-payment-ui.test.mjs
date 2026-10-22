@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import {sessionStorageFor,SESSION_KEY} from '../public/session-storage.js';
+import {adminRequestFromHash} from '../public/notification-links.js';
 import { unitPaymentPlan } from '../public/unit-payments.js';
 import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from '../public/payment-notices.js';
 import {requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange} from '../public/requests.js';
@@ -12,7 +14,7 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> 'test-stable-request'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
@@ -21,6 +23,18 @@ async function fixture(apiImpl){
  vm.runInContext(`state={admin:true,units:[{id:1,label:'Daire 1'}],charges:[{id:2,unit_id:1,period:'2026-02',amount:10000,paid:0},{id:1,unit_id:1,period:'2026-01',amount:10000,paid:2500}],payments:[]};`,context);
  return {context,element,requests,run:code=>vm.runInContext(code,context)};
 }
+test('Administrator notification waits for login then opens its request and consumes the target',async()=>{
+ const f=await fixture(),id='95f4f474-56fe-4e6f-8d5c-a1753341fd91';
+ f.context.testId=id;
+ f.run("state.admin=false;location.hash='#yonetim-talep='+testId;location.href='https://example.test/apartman/'+location.hash;");
+ assert.equal(await f.run('followNotification()'),false);
+ assert.equal(f.element('#dialogTitle').textContent,'Yönetici girişi');
+ assert.equal(f.requests.length,0);
+ f.run("state.admin=true;residentRequests=[{id:testId,unit_id:1,title:'Bildirimden açılan arıza',body:'TEST RECORD',created_at:'2026-10-22T12:00:00Z',status:'received'}];refresh=async()=>{};history.replaceState=(a,b,url)=>history.target=url;");
+ assert.equal(await f.run('followNotification()'),true);
+ assert.equal(f.element('#dialogTitle').textContent,'Bildirimden açılan arıza');assert.match(f.element('#dialogFields').innerHTML,/TEST RECORD/);
+ assert.equal(f.run('tab'),'requests');assert.equal(f.context.history.target,'https://example.test/apartman/');
+});
 test('total payment dialog previews oldest debt, rejects excess and reuses one request identity',async()=>{
  const f=await fixture();f.run('openUnitPayment(1)');
  const html=f.element('#dialogFields').innerHTML;

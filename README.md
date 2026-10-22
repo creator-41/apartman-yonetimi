@@ -49,7 +49,7 @@ API, public şemasındaki SECURITY INVOKER RPC fonksiyonlarından geçer:
 
 Ayrıcalıklı uygulama kodu Data API'ye açılmayan `apartman_private` şemasındadır. Yönetim işlemlerinde üyelik `auth.uid()` üzerinden kontrol edilir. Ortak ekranda malik/oturan isimleri, özel borç/ödeme notları ve yönetici işlem geçmişi yoktur. Hesap dökümü için ödeme tarihi, tutarı ve bağlı aidat kimliği ortak özette bulunur. Ortak ekran bağlantıyı bilen herkese açık olduğundan bölüm etiketleri ve ödeme durumları görülebilir.
 
-Tutarlar kuruş cinsinden tamsayıdır. Ödeme kontrolleri ve aylık borçlandırmalar bir veritabanı işlemi içinde kilitlemeyle yapılır; eşzamanlı istekler fazla ödeme veya çift aidat oluşturamaz. Oturum aynı sekmenin `sessionStorage` alanında apartmana özgü anahtarla tutulur; şifre kaydedilmez. Çıkış Supabase'in yalnızca mevcut oturumunu kapatır.
+Tutarlar kuruş cinsinden tamsayıdır. Ödeme kontrolleri ve aylık borçlandırmalar bir veritabanı işlemi içinde kilitlemeyle yapılır; eşzamanlı istekler fazla ödeme veya çift aidat oluşturamaz. Oturum bu cihazın `localStorage` alanında apartmana özgü anahtarla tutulur; şifre kaydedilmez. Çıkış Supabase'in yalnızca mevcut oturumunu kapatır.
 
 `public/config.js` yalnızca herkese açık publishable key içerir; `service_role` anahtarı asla istemciye eklenmez. Acısu'nun tabloları, politikaları, kullanıcıları veya Auth ayarları bu kurulumda değiştirilmez. Projenin Auth ve kullanım limitleri ortak kalır.
 
@@ -203,3 +203,11 @@ Tetikleyiciler commit sonrası pg_net ile göndericiyi uyandırır; `apartman-pu
 Kurulum notu: pg_net kendi nesnelerini `net` şemasında oluşturur; eklenti metadata kaydı `public` şemasında olduğundan advisor `extension_in_public` uyarısı veriyor. Eklentiyi düşürüp yeniden oluşturma işlemi otomatik onay denetiminde reddedildi; uygulanmadı. Diğer uygulamalara dokunmadan çalışan kurulum korundu. Üç yeni private tablo için doğrudan erişimi engelleyen RLS/no-policy bilgi notları beklenir.
 
 Canlı gönderici kontrolü: anahtarsız çağrı 401, yetkili boş kuyruk çağrısı 200; Deno üzerinde sentetik alıcıyla aes128gcm şifreleme 200/başarılı. Gerçek bir telefona teslim henüz doğrulanmadı. 84 Node testi ve sözdizimi kontrolleri geçti.
+
+## Bildirimden arıza kaydı ve kalıcı oturum
+
+Yöneticiye gelen yeni arıza bildirimleri yalnızca kayıt UUID’sini içeren `#yonetim-talep=...` bağlantısını taşır. Bu bir erişim anahtarı değildir; kayıt açılmadan önce apartman yöneticisi yetkisi doğrulanır. Giriş yoksa giriş ekranı açılır, başarı sonrası bekleyen kayıt gösterilir. Aynı uygulamanın açık penceresi varsa bildirim tıklaması onu yönlendirip öne getirir. Önceden teslim edilmiş, sadece ana sayfa adresini taşıyan bildirimler geriye dönük değiştirilemez.
+
+Oturum `komsu-apartman-session-v1` anahtarıyla localStorage içinde saklanır; mevcut tab oturumu bir kez taşınıp sessionStorage’dan kaldırılır. Şifre saklanmaz. Depolama kapalıysa tab/bellek oturumuna dönülür. Her istekte güncel oturum okunur; destekleyen tarayıcılarda Web Locks ile farklı sekmelerin refresh-token yenilemesi ve çıkışı sıraya alınır. Açık sekmeler storage olayıyla güncellenir. Supabase yenileme/üyelik kontrolleri korunur; Çıkış yap bu cihazın apartman oturumunu kaldırır. Başka sitede açılan Acısu oturumuna dokunulmaz.
+
+Bu düzeltmede 90 Node testi geçti; `verify-admin-request-push-link.sql` kayıt UUID’sinin yönetici işine eklendiğini, sakin takip anahtarının eklenmediğini ve yetkisiz worker/liste erişiminin engellendiğini ROLLBACK ile doğruladı.

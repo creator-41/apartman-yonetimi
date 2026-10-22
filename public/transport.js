@@ -1,11 +1,15 @@
 // Small REST adapter; all authorization and money rules are enforced in Postgres.
-// Session storage is namespaced, scoped to this tab, and never shared with Acısu.
-export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.now}) {
+// Persistent sessions remain namespaced separately from Acısu; no passwords are stored.
+export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.now,sessionLock=fn=>globalThis.navigator?.locks?.request?globalThis.navigator.locks.request('komsu-apartman-auth',fn):fn()}) {
   const storageKey='komsu-apartman-session-v1';
-  let session=null,refreshing=null;
-  try { session=JSON.parse(storage?.getItem(storageKey)||'null'); } catch { /* invalid storage is ignored */ }
-  if(!session?.access_token||!session?.refresh_token) session=null;
-  function save(value){session=value;try{if(value)storage?.setItem(storageKey,JSON.stringify(value));else storage?.removeItem(storageKey);}catch{/* privacy mode: memory-only session */}}
+  let session=null,refreshing=null,storageAvailable=true;
+  function readSession(){
+    if(!storage||!storageAvailable)return;
+    try{const value=JSON.parse(storage.getItem(storageKey)||'null');session=value?.access_token&&value?.refresh_token?value:null;}
+    catch{/* An invalid/blocked store must not expose another account's session. */session=null;}
+  }
+  readSession();
+  function save(value){session=value;try{if(value)storage?.setItem(storageKey,JSON.stringify(value));else storage?.removeItem(storageKey);}catch{storageAvailable=false;/* privacy mode: memory-only session */}}
   async function request(path,data,token,method='POST') {
     const response=await fetchImpl(url+path,{method,headers:{apikey:key,'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:data===undefined?undefined:JSON.stringify(data)});
     const result=await response.json().catch(()=>({}));
@@ -16,18 +20,22 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
     return result;
   }
   async function token(force=false){
+    readSession();
     if(!session)return null;
     if(!force && session.expires_at*1000>now()+30000)return session.access_token;
     if(!refreshing){
-      refreshing=(async()=>{
+      const previous=session.access_token;
+      refreshing=Promise.resolve().then(()=>sessionLock(async()=>{
+        readSession();
+        if(!session)return null;
+        if((!force||session.access_token!==previous)&&session.expires_at*1000>now()+30000)return session.access_token;
         try {
           const fresh=await request('/auth/v1/token?grant_type=refresh_token',{refresh_token:session.refresh_token});
           if(!fresh.access_token||!fresh.refresh_token)throw new Error('Oturum yenilenemedi. Tekrar giriş yapın.');
           save({...fresh,expires_at:fresh.expires_at||Math.floor(now()/1000)+fresh.expires_in});
           return session.access_token;
         }catch(e){if(e.status===400||e.status===401)save(null);throw e;}
-        finally{refreshing=null;}
-      })();
+      })).finally(()=>{refreshing=null;});
     }
     return refreshing;
   }
@@ -51,9 +59,11 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
     return result;
   }
   async function logout(){
-    const current=session?.access_token;
-    save(null);
-    if(current)await request('/auth/v1/logout?scope=local',{},current);
+    return sessionLock(async()=>{
+      readSession();const current=session?.access_token;
+      save(null);
+      if(current)await request('/auth/v1/logout?scope=local',{},current);
+    });
     return {ok:true};
   }
   return async function api(path,method='GET',data){

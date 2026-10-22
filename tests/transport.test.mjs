@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createApi} from '../public/transport.js';
+import {sessionStorageFor,SESSION_KEY} from '../public/session-storage.js';
 const ok=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
 function setup(responder,saved=null){
  const map=new Map(saved?[['komsu-apartman-session-v1',JSON.stringify(saved)]]:[]),calls=[];
@@ -44,4 +45,31 @@ test('Rejected refresh clears session; network failure preserves it',async()=>{
 test('Database authorization errors are surfaced',async()=>{
  const {api,calls}=setup(()=>ok({message:'Apartman yöneticisi yetkisi gerekli.'},403));
  await assert.rejects(api('charges','POST',{amount:500,period:'2026-10'}),/yetkisi gerekli/);assert.equal(calls.length,1);
+});
+test('Existing tab session migrates once to persistent storage, isolated from club credentials',()=>{
+ const old=JSON.stringify({access_token:'access',refresh_token:'refresh',expires_at:5000});
+ const persistent=new Map([['acisu-session','CLUB']]),tab=new Map([[SESSION_KEY,old]]);
+ const store=map=>({getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v),removeItem:k=>map.delete(k)});
+ const win={localStorage:store(persistent),sessionStorage:store(tab)};
+ assert.equal(sessionStorageFor(win),win.localStorage);assert.equal(persistent.get(SESSION_KEY),old);assert(!tab.has(SESSION_KEY));assert.equal(persistent.get('acisu-session'),'CLUB');
+ assert.equal(sessionStorageFor({get localStorage(){throw Error('blocked');},sessionStorage:win.sessionStorage}),win.sessionStorage);
+});
+test('Reopened app restores persisted login and logout clears another open instance',async()=>{
+ const {api,map}=setup(c=>c.url.includes('grant_type=password')?ok({access_token:'a',refresh_token:'r',expires_at:5000}):ok({admin:true}));
+ await api('login','POST',{email:'test@example.test',password:'temporary-input'});
+ const calls=[],storage={getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v),removeItem:k=>map.delete(k)};
+ const reopened=createApi({url:'https://test',key:'public',storage,now:()=>1000000,fetchImpl:async(url,options)=>{calls.push(options.headers.Authorization);return ok({admin:true});}});
+ await reopened('state');assert.equal(calls.at(-1),'Bearer a');assert(!map.get(SESSION_KEY).includes('temporary-input'));
+ await api('logout','POST',{});await reopened('state');assert.equal(calls.at(-1),undefined);
+});
+test('Two app instances serialize refresh and reuse the rotated persistent session',async()=>{
+ const map=new Map([[SESSION_KEY,JSON.stringify({access_token:'old',refresh_token:'old-r',expires_at:900})]]);
+ const storage={getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v),removeItem:k=>map.delete(k)};
+ let chain=Promise.resolve(),refreshes=0;
+ const sessionLock=fn=>{const result=chain.then(fn);chain=result.catch(()=>{});return result;};
+ const opts={url:'https://test',key:'pub',storage,sessionLock,now:()=>1000000,fetchImpl:async(url,options)=>{
+  if(url.includes('refresh_token')){refreshes++;return ok({access_token:'new',refresh_token:'new-r',expires_at:5000});}
+  assert.equal(options.headers.Authorization,'Bearer new');return ok({admin:true});
+ }};
+ await Promise.all([createApi(opts)('state'),createApi(opts)('state')]);assert.equal(refreshes,1);
 });
