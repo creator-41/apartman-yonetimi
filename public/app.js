@@ -1,3 +1,4 @@
+import { decisionReadPayload } from './decision-reads.js?v=reads-1';
 import { sessionStorageFor, SESSION_KEY } from './session-storage.js?v=persistent-1';
 import { adminRequestFromHash } from './notification-links.js?v=push-link-1';
 import { createPush } from './push.js?v=push-1';
@@ -13,7 +14,7 @@ import { openTasks, taskSave, statusName } from './work.js?v=request-1';
 import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=request-1';
 import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStatementText } from './reports.js?v=summary-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=persistent-1';
+import { createApi } from './transport.js?v=reads-1';
 import { config } from './config.js?v=push-1';
 const storage=sessionStorageFor(window);
 const api=createApi({...config,storage});
@@ -26,7 +27,7 @@ let reportContext=null;
 let documentTarget=null;
 let workFilter="open";let decisionArchive=false;
 let uploadingDocument=false;
-let createdPaymentId=null;
+let createdPaymentId=null,createdDecisionReadId=null;
 let unitPaymentContext=null,createdPaymentGroup=null;
 let paymentNotices=[],paymentNoticeError="",createdNoticeAcknowledgement=null;
 let residentRequests=[],requestError="",requestFilter="open",requestAccess=null,createdResidentRequest=null;
@@ -150,6 +151,32 @@ function requestRow(id){if(!state.admin)throw new Error('Yönetici girişi gerek
 function showRequestDetail(id){
  const r=requestRow(id);
  openReadDialog(r.title,'<p>'+esc(unitName(r.unit_id))+' · '+esc(requestStatus(r.status))+' · '+esc(timeName(r.created_at))+'</p>'+(r.location?'<p>Yer: '+esc(r.location)+'</p>':'')+'<p class="work-body">'+esc(r.body)+'</p>'+(r.reply?'<div class="note">'+esc(r.reply)+'</div>':'')+(r.has_photo?(r.uploaded?'<button type="button" class="outline" data-action="request-photo" data-request-id="'+esc(id)+'">Fotoğrafı aç</button>':'<p class="help">Fotoğraf yüklemesi tamamlanmamış.</p>'):'')+'<div class="actions report-actions"><button type="button" class="primary" data-action="request-status" data-request-id="'+esc(id)+'">Durum / Yanıt</button>'+(r.task_id?'<button type="button" class="outline" data-action="task-detail" data-id="'+r.task_id+'">Görevi aç</button>':'<button type="button" class="outline" data-action="request-task" data-request-id="'+esc(id)+'">Görev oluştur</button>')+'</div>');
+}
+let decisionReadContext=null;
+async function showDecisionDetail(id){
+ const d=state.decisions.find(x=>x.id===id);if(!d)throw new Error('Karar bulunamadı.');
+ const reads=await api('decisions/reads','POST',{decisionId:id});
+ if(reads.version!==d.version)throw new Error('Karar değişmiş. Sayfayı yenileyin.');
+ decisionReadContext={decision:d,summary:reads};
+ const tracking='<h3 class="section-title">Okudum bildirimleri</h3><p><strong>'+reads.total+' bölümden '+reads.read+'’i bildirdi.</strong></p>'+(state.admin?'<p class="help">Daire adına beyan edilir; kimlik doğrulaması veya oylama değildir.</p>'+table(['Bölüm','Bildirim',''],(reads.units||[]).map(u=>'<tr><td>'+esc(u.label)+'</td><td>'+(u.read?'Okudum · '+esc(timeName(u.readAt)):'Henüz bildirmedi')+'</td><td>'+(u.read?'<button type="button" class="small outline" data-action="decision-read-remove" data-id="'+id+'" data-unit-id="'+u.unitId+'">Bildirimi kaldır</button>':'')+'</td></tr>')):(!d.archived?'<button type="button" class="primary" data-action="decision-read" data-id="'+id+'">Okudum bildir</button><p class="help">Dairenizi / dükkânınızı seçerek bildirebilirsiniz.</p>':'<p class="help">Bu karar arşivde.</p>'));
+ openReadDialog(d.title,'<p class="muted">'+dateName(d.date)+(d.decision_no?' · Karar no: '+esc(d.decision_no):'')+'</p><p class="work-body">'+esc(d.body)+'</p>'+((state.admin||(d.files||[]).length)?'<button type="button" class="outline" data-action="decision-files" data-id="'+d.id+'">Belgeler ('+(d.files||[]).length+')</button>':'')+tracking);
+}
+function openDecisionRead(id){
+ const d=decisionReadContext?.decision;if(!d||d.id!==id||d.archived)throw new Error('Kararı yeniden açın.');
+ openDialog('Kararı okudum','<p>'+esc(d.title)+'</p><label for="f-unitId">Daireniz / dükkânınız</label><select id="f-unitId" name="unitId" required><option value="">Seçin</option>'+state.units.map(u=>'<option value="'+u.id+'">'+esc(u.label)+'</option>').join('')+'</select><label class="check"><input type="checkbox" name="confirmed" required> Seçtiğim bölüm adına bu kararı okudum.</label>',async f=>{
+  if(!f.get('confirmed'))throw new Error('Okudum kutusunu işaretleyin.');
+  await api('decisions/reads','POST',decisionReadPayload(d,f.get('unitId')));createdDecisionReadId=id;toast('Okudum bildiriminiz kaydedildi.');
+ },'Okudum');
+}
+async function removeDecisionRead(id,unitId){
+ if(!state.admin)throw new Error('Yönetici girişi gerekli.');
+ const current=decisionReadContext;if(current?.decision.id!==id)throw new Error('Kararı yeniden açın.');
+ const row=current.summary.units?.find(u=>u.unitId===unitId&&u.read);if(!row)throw new Error('Bildirim bulunamadı.');
+ const d=current.decision;
+ openDialog('Okudum bildirimini kaldır','<p>'+esc(row.label)+' için bu karara ait bildirim kaldırılacak.</p><label class="check"><input name="confirmed" type="checkbox" required> Bildirimi kaldır.</label>',async f=>{
+  if(!f.get('confirmed'))throw new Error('Kaldırma kutusunu işaretleyin.');
+  await api('decisions/reads','POST',{operation:'remove',decisionId:id,unitId,version:d.version,readAt:row.readAt});createdDecisionReadId=id;toast('Bildirim kaldırıldı.');
+ },'Kaldır');
 }
 function editRequestStatus(id){
  const r=requestRow(id);
@@ -385,8 +412,8 @@ $('#dialogForm').addEventListener('submit',async e=>{
  e.preventDefault();if(!dialogAction)return;const button=$('#dialogSubmit');button.disabled=true;
  try{
   await dialogAction(new FormData(e.target));$('#modal').close();
-  const paymentId=createdPaymentId,group=createdPaymentGroup,notice=createdNoticeAcknowledgement,residentRequest=createdResidentRequest;createdPaymentId=null;createdPaymentGroup=null;createdNoticeAcknowledgement=null;createdResidentRequest=null;
-  try{await refresh();if(residentRequest)await showOwnRequest({id:residentRequest.id,token:residentRequest.token});else if(notice)showNoticeAcknowledgement(notice);else if(group)showPaymentGroup(group);else if(paymentId)showReceipt(paymentId);else await followNotification();}
+  const paymentId=createdPaymentId,group=createdPaymentGroup,notice=createdNoticeAcknowledgement,residentRequest=createdResidentRequest,readId=createdDecisionReadId;createdDecisionReadId=null;createdPaymentId=null;createdPaymentGroup=null;createdNoticeAcknowledgement=null;createdResidentRequest=null;
+  try{await refresh();if(residentRequest)await showOwnRequest({id:residentRequest.id,token:residentRequest.token});else if(notice)showNoticeAcknowledgement(notice);else if(group)showPaymentGroup(group);else if(paymentId)showReceipt(paymentId);else if(readId)await showDecisionDetail(readId);else await followNotification();}
   catch(err){error(new Error('İşlem tamamlandı, ekran yenilenemedi. Tekrar kaydetmeden önce sayfayı yenileyin. '+err.message));}
  }catch(err){$('#dialogError').textContent=err.message;}finally{button.disabled=false;}
 });
@@ -514,7 +541,9 @@ document.addEventListener('click',async e=>{
  }
  else if(action==='decision'||action==='task'){editWork(action);}
  else if(action==='edit-decision'||action==='edit-task'){const kind=action.slice(5);editWork(kind,(kind==='decision'?state.decisions:state.tasks).find(x=>x.id===id));}
- else if(action==='decision-detail'){const d=state.decisions.find(x=>x.id===id);if(!d)throw new Error('Karar bulunamadı.');openReadDialog(d.title,'<p class="muted">'+dateName(d.date)+(d.decision_no?' · Karar no: '+esc(d.decision_no):'')+'</p><p class="work-body">'+esc(d.body)+'</p>'+((state.admin||(d.files||[]).length)?'<button type="button" class="outline" data-action="decision-files" data-id="'+d.id+'">Belgeler ('+(d.files||[]).length+')</button>':''));}
+ else if(action==='decision-detail'){await showDecisionDetail(id);}
+ else if(action==='decision-read'){openDecisionRead(id);}
+ else if(action==='decision-read-remove'){await removeDecisionRead(id,Number(btn.dataset.unitId));}
  else if(action==='decision-files'){showDocumentFiles('decision',id);}
  else if(action==='task-detail'){const t=state.tasks.find(x=>x.id===id);if(!t)throw new Error('İş bulunamadı.');const d=state.decisions.find(x=>x.id===t.decision_id);openReadDialog(t.title,'<p>'+esc(statusName(t.status))+' · '+esc(t.assignee||'Sorumlu belirtilmedi')+(t.due_date?' · '+dateName(t.due_date):'')+'</p><p class="work-body">'+esc(t.notes)+'</p>'+(d?'<button type="button" class="outline" data-action="decision-detail" data-id="'+d.id+'">İlgili karar: '+esc(d.title)+'</button>':''));}
  else if(action==='complete-task'){const t=state.tasks.find(x=>x.id===id);btn.disabled=true;await api('tasks/manage','POST',taskSave(t,{status:t.status==='done'?'pending':'done'}));await refresh();toast('İşin durumu güncellendi.');}

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import {decisionReadPayload} from '../public/decision-reads.js';
 import {sessionStorageFor,SESSION_KEY} from '../public/session-storage.js';
 import {adminRequestFromHash} from '../public/notification-links.js';
 import { unitPaymentPlan } from '../public/unit-payments.js';
@@ -14,7 +15,7 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> 'test-stable-request'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
@@ -34,6 +35,21 @@ test('Administrator notification waits for login then opens its request and cons
  assert.equal(await f.run('followNotification()'),true);
  assert.equal(f.element('#dialogTitle').textContent,'Bildirimden açılan arıza');assert.match(f.element('#dialogFields').innerHTML,/TEST RECORD/);
  assert.equal(f.run('tab'),'requests');assert.equal(f.context.history.target,'https://example.test/apartman/');
+});
+test('Decision detail separates resident declaration from administrator unit tracking and stale-safe removal',async()=>{
+ let summary={decisionId:1,version:'v1',total:2,read:1};
+ const f=await fixture(()=>summary);
+ f.run("state.admin=false;state.decisions=[{id:1,title:'Karar <script>',body:'Karar metni',date:'2026-10-22',version:'v1',archived:false,files:[]}];");
+ await f.run('showDecisionDetail(1)');let html=f.element('#dialogFields').innerHTML;
+ assert.match(html,/Okudum bildir/);assert.doesNotMatch(html,/Bildirimi kaldır/);
+ f.run('openDecisionRead(1)');html=f.element('#dialogFields').innerHTML;assert.match(html,/Karar &lt;script&gt;/);assert.match(html,/name="confirmed" required/);
+ f.context.form=new Map([['unitId','1'],['confirmed','on']]);await f.run('dialogAction(form)');
+ assert.equal(f.requests.at(-1)[2].unitId,1);assert.equal(f.requests.at(-1)[2].version,'v1');
+ f.run('state.admin=true');summary={...summary,units:[{unitId:1,label:'Daire <1>',read:true,readAt:'2026-10-22T12:00:00Z'},{unitId:2,label:'Daire 2',read:false}]};
+ await f.run('showDecisionDetail(1)');html=f.element('#dialogFields').innerHTML;assert.match(html,/Daire &lt;1&gt;/);assert.match(html,/Henüz bildirmedi/);assert.match(html,/Bildirimi kaldır/);
+ await f.run('removeDecisionRead(1,1)');f.context.form=new Map([['confirmed','on']]);await f.run('dialogAction(form)');
+ assert.equal(f.requests.at(-1)[2].operation,'remove');assert.equal(f.requests.at(-1)[2].readAt,'2026-10-22T12:00:00Z');
+ summary={...summary,version:'v2'};await assert.rejects(()=>f.run('showDecisionDetail(1)'),/Karar değişmiş/);
 });
 test('total payment dialog previews oldest debt, rejects excess and reuses one request identity',async()=>{
  const f=await fixture();f.run('openUnitPayment(1)');
