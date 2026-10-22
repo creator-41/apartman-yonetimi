@@ -12,7 +12,7 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> 'test-stable-request'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
