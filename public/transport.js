@@ -77,6 +77,7 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       }
       throw new Error('Geçersiz fotoğraf işlemi.');
     }
+    if(path==='push/device')return rpc('apartman_push_device',{payload:data});
     if(path==='requests')return rpc('apartman_request_list',{});
     if(['submit','complete','track','manage'].includes(path.split('/')[1])&&path.startsWith('requests/')&&method==='POST')return rpc('apartman_request_'+path.split('/')[1],{payload:data});
     if(path.startsWith('notice-files/')){

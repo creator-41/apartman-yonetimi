@@ -1,7 +1,8 @@
+import { createPush } from './push.js?v=push-1';
 import { requestStatus, requestPayload, sendRequest, requestLink, requestFromHash, requestChange } from './requests.js?v=request-1';
 import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from './payment-notices.js?v=request-1';
 import { unitPaymentPlan } from './unit-payments.js?v=request-1';
-import { initPwa } from './pwa.js?v=request-1';
+import { initPwa } from './pwa.js?v=push-1';
 import { filterUnits } from './dues-filters.js?v=request-1';
 import { changeInfo } from './history.js?v=request-1';
 import { paymentReceipt, receiptSvg, receiptLink, downloadReceipt } from './receipts.js?v=request-1';
@@ -10,11 +11,12 @@ import { openTasks, taskSave, statusName } from './work.js?v=request-1';
 import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=request-1';
 import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStatementText } from './reports.js?v=summary-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=request-1';
-import { config } from './config.js';
+import { createApi } from './transport.js?v=push-1';
+import { config } from './config.js?v=push-1';
 let storage;
 try { storage=window.sessionStorage; } catch { /* memory-only session */ }
 const api=createApi({...config,storage});
+const push=createPush({api,publicKey:config.vapidPublicKey});
 const selectedCharges=new Set();
 let chargeDialogContext=null;
 let bulkMode=false;
@@ -49,6 +51,7 @@ async function refresh(){
  document.querySelectorAll('.admin-only').forEach(e=>e.hidden=!state.admin);
  if(!state.admin&&['units','settings','history','payment-notices','requests'].includes(tab))tab='overview';
  $('#error').hidden=true;render();
+ push.sync({admin:state.admin}).catch(()=>{});
 }
 function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').hidden=true,4500);}
 function error(e){$('#error').textContent=e.message;$('#error').hidden=false;if($('#modal').open)$('#dialogError').textContent=e.message;}
@@ -79,6 +82,11 @@ function bankHTML(){
 }
 function bankForm(){
  return '<section class="panel"><h2>Aidat ödeme hesabı</h2><form id="bankForm" class="setting-form"><label for="accountHolder">Hesap sahibi</label><input id="accountHolder" name="accountHolder" maxlength="100" value="'+esc(state.settings.accountHolder)+'"><label for="iban">IBAN</label><input id="iban" name="iban" maxlength="40" placeholder="TR…" autocomplete="off" value="'+esc(formatIban(state.settings.iban))+'"><p class="help">Kaydedilen hesap bilgileri ortak Aidatlar ekranında görünür. Kaldırmak için IBAN alanını boşaltın.</p><button class="primary" type="submit">Ödeme hesabını kaydet</button><p id="bankError" role="alert"></p></form></section>';
+}
+async function showPushSettings(){
+ let syncError='';try{await push.sync({admin:state.admin,access:requestAccess,force:true});}catch{syncError='Cihaz kaydı güncellenemedi. Bağlantıyı kontrol edip tekrar deneyin.';}
+ const support=push.support(),enabled=push.enabled();
+ openReadDialog('Bildirimler','<p>'+ (enabled?'Bildirimler bu cihazda açık.':'Bildirimler bu cihazda kapalı.')+'</p><p>Yeni duyuru ve yönetim kararları için haber alın.'+(state.admin?' Yönetici olarak yeni ödeme bildirimleri ve arıza / talepler de bu cihaza gelir.':'')+(requestAccess?' Bu talebin durum ve yanıt güncellemeleri de bu cihaza gelir.':'')+'</p><p class="help">Bildirimde tutar, daire veya talep açıklaması gösterilmez.</p>'+(syncError?'<p role="alert">'+esc(syncError)+'</p>':'')+(support==='install'?'<p>iPhone’da siteyi ana ekrana ekleyin ve uygulama simgesinden açın. Ardından burada bildirimleri açın.</p><button type="button" class="primary" data-action="install-app">Ana ekrana ekle</button>':support==='unsupported'?'<p>Bu tarayıcı telefon bildirimlerini desteklemiyor. Güncel bir telefon tarayıcısından deneyin.</p>':'<div class="actions"><button type="button" class="primary" data-action="'+(enabled?'push-disable':'push-enable')+'">'+(enabled?'Bildirimleri kapat':'Bildirimleri aç')+'</button>'+(enabled?'<button type="button" class="outline" data-action="push-test">Deneme bildirimi gönder</button>':'')+'</div>'));
 }
 async function copyPaymentText(text,label){
  try{await navigator.clipboard.writeText(text);toast(label);}
@@ -131,7 +139,7 @@ function openResidentRequest(){
 async function showOwnRequest(access){
  requestAccess=access;history.replaceState(null,'',requestLink(location.href,access.id,access.token));
  const r=await api('requests/track','POST',access);
- openReadDialog('Talebiniz · '+r.id.slice(0,8),'<h3>'+esc(r.title)+'</h3><p><span class="badge">'+esc(requestStatus(r.status))+'</span> · '+dateName(r.created_at)+'</p>'+(r.location?'<p>Yer: '+esc(r.location)+'</p>':'')+'<p class="work-body">'+esc(r.body)+'</p>'+(r.reply?'<div class="note"><strong>Yönetim yanıtı</strong><p>'+esc(r.reply)+'</p></div>':'')+(r.has_photo?'<p class="help">Fotoğraf: '+(r.uploaded?'Yüklendi':'Yükleme tamamlanmamış; yöneticiye ulaşabilirsiniz.')+'</p>':'')+'<div class="actions"><button type="button" class="outline" data-action="request-track">Durumu yenile</button><button type="button" class="primary" data-action="request-copy-link">Takip bağlantısını kopyala</button></div><p class="help">Bu bağlantıyı saklayın. Bağlantıya sahip kişi talebinizi ve yönetim yanıtını görebilir.</p>');
+ openReadDialog('Talebiniz · '+r.id.slice(0,8),'<h3>'+esc(r.title)+'</h3><p><span class="badge">'+esc(requestStatus(r.status))+'</span> · '+dateName(r.created_at)+'</p>'+(r.location?'<p>Yer: '+esc(r.location)+'</p>':'')+'<p class="work-body">'+esc(r.body)+'</p>'+(r.reply?'<div class="note"><strong>Yönetim yanıtı</strong><p>'+esc(r.reply)+'</p></div>':'')+(r.has_photo?'<p class="help">Fotoğraf: '+(r.uploaded?'Yüklendi':'Yükleme tamamlanmamış; yöneticiye ulaşabilirsiniz.')+'</p>':'')+'<div class="actions"><button type="button" class="outline" data-action="push-settings">Yanıt bildirimleri</button><button type="button" class="outline" data-action="request-track">Durumu yenile</button><button type="button" class="primary" data-action="request-copy-link">Takip bağlantısını kopyala</button></div><p class="help">Bu bağlantıyı saklayın. Bağlantıya sahip kişi talebinizi ve yönetim yanıtını görebilir.</p>');
 }
 function residentRequestsHTML(){
  const rows=residentRequests.filter(r=>requestFilter==='all'||(requestFilter==='open'?r.status!=='done':r.status==='done'));
@@ -226,8 +234,8 @@ async function confirmBatchUndo(id){
  openDialog('Toplam ödemeyi geri al','<p><strong>'+esc(unitName(group.unitId))+'</strong> · '+dateName(group.date)+'</p>'+table(['Ay','Geri alınacak'],group.allocations.map(a=>'<tr><td>'+esc(monthName(a.period))+'</td><td>'+money(a.amount)+'</td></tr>'))+'<div class="note"><p>Kasa değişimi: <strong>'+signedMoney(-group.amount)+'</strong></p><p>Aidat borcu değişimi: <strong>'+signedMoney(group.amount)+'</strong></p></div><p>Bu ödemeye ait bütün aylar birlikte geri alınsın mı?</p>',async()=>{await api('payments/batch/undo','POST',{id});toast('Toplam ödeme geri alındı.');},'Tüm ödemeyi geri al');$('#dialogSubmit').disabled=false;
 }
 function moreLinks(){
- const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" '+(target==='request-new'?'data-action="request-new"':'data-tab="'+target+'"')+'><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
- return '<section class="more-section"><h2>Bilgiler</h2>'+links([['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
+ const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" '+(['request-new','push-settings'].includes(target)?'data-action="'+target+'"':'data-tab="'+target+'"')+'><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
+ return '<section class="more-section"><h2>Bilgiler</h2>'+links([['push-settings','Bildirimler','Bu cihazın bildirimlerini yönet'],['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
 }
 function pendingUnits(){return state.units.map(u=>({u,total:state.charges.filter(c=>c.unit_id===u.id).reduce((sum,c)=>sum+c.amount-c.paid,0)})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total||a.u.id-b.u.id);}
 function pendingRows(rows){return rows.map(({u,total})=>'<button class="pending-row" data-action="unit-detail" data-id="'+u.id+'"><strong>'+esc(u.label)+'</strong><span>'+money(total)+' <span aria-hidden="true">›</span></span></button>').join('');}
@@ -436,6 +444,10 @@ document.addEventListener('click',async e=>{
  else if(action==='request-status'){editRequestStatus(btn.dataset.requestId);}
  else if(action==='request-task'){createRequestTask(btn.dataset.requestId);}
  else if(action==='request-track'){if(!requestAccess)throw new Error('Takip bağlantınızı açın.');await showOwnRequest(requestAccess);}
+ else if(action==='push-settings'){await showPushSettings();}
+ else if(action==='push-enable'){btn.disabled=true;try{await push.enable({admin:state.admin,access:requestAccess});await showPushSettings();toast('Bildirimler bu cihazda açıldı.');}finally{btn.disabled=false;}}
+ else if(action==='push-disable'){btn.disabled=true;try{await push.disable();await showPushSettings();toast('Bildirimler bu cihazda kapatıldı.');}finally{btn.disabled=false;}}
+ else if(action==='push-test'){btn.disabled=true;try{await push.test();toast('Deneme bildirimi sıraya alındı.');}finally{btn.disabled=false;}}
  else if(action==='request-copy-link'){if(requestAccess)await copyPaymentText(requestLink(location.href,requestAccess.id,requestAccess.token),'Takip bağlantısı kopyalandı.');}
  else if(action==='request-photo'){
   const r=requestRow(btn.dataset.requestId);if(!r.uploaded)throw new Error('Fotoğraf bulunamadı.');
