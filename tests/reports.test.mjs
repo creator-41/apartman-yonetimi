@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {monthReport,unitStatement,monthReportText,unitStatementText,chargeDate} from '../public/reports.js';
+import {monthReport,unitStatement,monthReportText,monthSummaryText,unitStatementText,chargeDate} from '../public/reports.js';
 import {createApi} from '../public/transport.js';
 const state={admin:true,settings:{name:'Komşu',openingBalance:'10000'},units:[{id:1,label:'Daire 1',owner:'PRIVATE OWNER'},{id:2,label:'Daire 2'}],
  charges:[{id:1,unit_id:1,period:'2026-08',kind:'opening',incurred_on:'2026-08-20',amount:50000,note:'PRIVATE DEBT NOTE'},{id:2,unit_id:1,period:'2026-10',amount:30000},{id:3,unit_id:2,period:'2026-11',amount:10000}],
@@ -33,6 +33,19 @@ test('Resident statements and shared text omit owner names and private notes',()
 test('Empty months, year boundaries and invalid input remain predictable',()=>{
  const empty={...state,charges:[],payments:[],expenses:[]};assert.equal(monthReport(empty,'2027-01').opening,10000);assert.equal(monthReport(empty,'2027-01').income,0);
  assert.deepEqual(unitStatement(empty,1),{rows:[],debit:0,credit:0,balance:0});assert.throws(()=>monthReport(state,'2026-13'));
+});
+test('WhatsApp summary separates selected-month activity from current totals and omits private details',()=>{
+ const s={...state,totals:{cash:63000,receivable:30000}};
+ const text=monthSummaryText(s,'2026-10','https://example.test/apartman/?receipt=51#talep=PRIVATE-TOKEN');
+ assert.match(text,/Ekim 2026 · Aylık özet/);
+ assert(text.includes('Tahsilat: '+new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(200)));
+ assert.match(text,/Elektrik:.*50,00/);
+ assert.match(text,/Güncel kasa:.*630,00/);
+ assert.match(text,/Toplam kalan aidat \(tüm dönemler\):.*300,00/);
+ assert(text.endsWith('https://example.test/apartman/'));
+ assert.doesNotMatch(text,/Daire|PRIVATE|receipt|TAHSİLATLAR|AİDAT BORCU KALAN/);
+ const empty=monthSummaryText({...s,expenses:[]},'2027-01','https://example.test/apartman/');
+ assert.match(empty,/Bu ay harcama yok\./);
 });
 test('Opening debt transport uses its dedicated authenticated RPC',async()=>{
  let sent;const api=createApi({url:'https://test',key:'public',fetchImpl:async(url,options)=>{sent={url,body:JSON.parse(options.body)};return {ok:true,json:async()=>({ok:true})};}});
