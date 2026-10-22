@@ -7,6 +7,7 @@ export function allowedEndpoint(value){
 export function notificationPayload(job){
  const bodies={notice:'Yeni bir duyuru yayınlandı.',decision:'Yeni bir yönetim kararı yayınlandı.',payment:'Yeni bir ödeme bildirimi var.',request:'Yeni bir arıza / talep var.',reply:'Talebinizin durumu veya yönetim yanıtı güncellendi.',test:'Bildirimler bu cihazda çalışıyor.'};
  let url=ROOT;
+ if(job.kind==='request'&&/^[0-9a-f-]{36}$/.test(job.requestId))url+='#yonetim-talep='+job.requestId;
  if(job.kind==='reply'&&/^[0-9a-f-]{36}$/.test(job.requestId)&&/^[0-9a-f-]{36}$/.test(job.requestToken))url+='#talep='+job.requestId+'.'+job.requestToken;
  return {title:'Komşu',body:bodies[job.kind]||'Apartman ekranında yeni bir gelişme var.',tag:'komsu-'+job.id,url};
 }

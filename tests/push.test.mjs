@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import {createPush,pushSupport} from '../public/push.js';
 import {allowedEndpoint,notificationPayload,dispatch,secretMatches} from '../supabase/functions/apartman-push/handler.mjs';
 import {createApi} from '../public/transport.js';
+import {adminRequestFromHash} from '../public/notification-links.js';
 function fixture(){
  const values=new Map(),calls=[];let prompts=0,subscribed=0,unsubscribed=0;
  const sub={endpoint:'https://fcm.googleapis.com/fcm/send/device',toJSON(){return {endpoint:this.endpoint,keys:{p256dh:'PUBLIC',auth:'AUTH'}};},async unsubscribe(){unsubscribed++;return true;}};
@@ -48,7 +49,7 @@ test('Dispatcher acknowledges only actual provider response, avoids redirects an
 });
 test('Worker push displays a visible generic notification and constrains click targets to this app',async()=>{
  const events={},shown=[],opened=[];let done;
- vm.runInNewContext(fs.readFileSync(new URL('../public/sw.js',import.meta.url),'utf8'),{URL,Response,self:{location:{href:'https://example.test/apartman/sw.js'},addEventListener:(n,fn)=>events[n]=fn,registration:{showNotification:async(...x)=>shown.push(x)},clients:{openWindow:async u=>opened.push(u)}}});
+ vm.runInNewContext(fs.readFileSync(new URL('../public/sw.js',import.meta.url),'utf8'),{URL,Response,self:{location:{href:'https://example.test/apartman/sw.js'},addEventListener:(n,fn)=>events[n]=fn,registration:{showNotification:async(...x)=>shown.push(x)},clients:{matchAll:async()=>[],openWindow:async u=>opened.push(u)}}});
  events.push({data:{json:()=>({body:'Yeni bir duyuru yayınlandı.',url:'https://evil.test/'})},waitUntil:p=>done=p});await done;
  assert.equal(shown[0][0],'Komşu');assert.equal(shown[0][1].data.url,'https://example.test/apartman/');
  events.notificationclick({notification:{close(){},data:{url:'https://evil.test/'}},waitUntil:p=>done=p});await done;assert.equal(opened[0],'https://example.test/apartman/');
@@ -56,4 +57,19 @@ test('Worker push displays a visible generic notification and constrains click t
 test('Push transport uses the capability-guarded device RPC',async()=>{
  let sent;const api=createApi({url:'https://test',key:'public',fetchImpl:async(url,options)=>{sent={url,body:JSON.parse(options.body)};return {ok:true,json:async()=>({ok:true})};}});
  await api('push/device','POST',{id:'device',token:'secret',operation:'remove'});assert.equal(sent.url,'https://test/rest/v1/rpc/apartman_push_device');assert.equal(sent.body.payload.operation,'remove');
+});
+test('Administrator request notifications carry the exact record ID without a resident capability',()=>{
+ const id='95f4f474-56fe-4e6f-8d5c-a1753341fd91';
+ const payload=notificationPayload({id:1,kind:'request',requestId:id,requestToken:'SECRET'});
+ assert.equal(payload.url,'https://creator-41.github.io/apartman-yonetimi/#yonetim-talep='+id);
+ assert.doesNotMatch(JSON.stringify(payload),/SECRET/);assert.equal(adminRequestFromHash('#yonetim-talep='+id),id);
+ assert.equal(adminRequestFromHash('#yonetim-talep=bad'),null);assert.equal(adminRequestFromHash('#yonetim-talep='+id+'&other=1'),null);
+});
+test('Notification click navigates and focuses the existing app window, preserving its session',async()=>{
+ const events={},actions=[];let done;
+ const target='https://example.test/apartman/#yonetim-talep=95f4f474-56fe-4e6f-8d5c-a1753341fd91';
+ const client={url:'https://example.test/apartman/?source=app',navigate:async url=>{actions.push(['navigate',url]);return client;},focus:async()=>actions.push(['focus'])};
+ vm.runInNewContext(fs.readFileSync(new URL('../public/sw.js',import.meta.url),'utf8'),{URL,Response,self:{location:{href:'https://example.test/apartman/sw.js'},addEventListener:(n,fn)=>events[n]=fn,registration:{showNotification:async()=>{}},clients:{matchAll:async()=>[{url:'https://example.test/other/'},client],openWindow:async u=>actions.push(['open',u])}}});
+ events.notificationclick({notification:{close(){},data:{url:target}},waitUntil:p=>done=p});await done;
+ assert.deepEqual(actions,[['navigate',target],['focus']]);
 });

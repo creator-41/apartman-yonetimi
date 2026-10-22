@@ -1,3 +1,5 @@
+import { sessionStorageFor, SESSION_KEY } from './session-storage.js?v=persistent-1';
+import { adminRequestFromHash } from './notification-links.js?v=push-link-1';
 import { createPush } from './push.js?v=push-1';
 import { requestStatus, requestPayload, sendRequest, requestLink, requestFromHash, requestChange } from './requests.js?v=request-1';
 import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from './payment-notices.js?v=request-1';
@@ -11,10 +13,9 @@ import { openTasks, taskSave, statusName } from './work.js?v=request-1';
 import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=request-1';
 import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStatementText } from './reports.js?v=summary-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=push-1';
+import { createApi } from './transport.js?v=persistent-1';
 import { config } from './config.js?v=push-1';
-let storage;
-try { storage=window.sessionStorage; } catch { /* memory-only session */ }
+const storage=sessionStorageFor(window);
 const api=createApi({...config,storage});
 const push=createPush({api,publicKey:config.vapidPublicKey});
 const selectedCharges=new Set();
@@ -385,15 +386,30 @@ $('#dialogForm').addEventListener('submit',async e=>{
  try{
   await dialogAction(new FormData(e.target));$('#modal').close();
   const paymentId=createdPaymentId,group=createdPaymentGroup,notice=createdNoticeAcknowledgement,residentRequest=createdResidentRequest;createdPaymentId=null;createdPaymentGroup=null;createdNoticeAcknowledgement=null;createdResidentRequest=null;
-  try{await refresh();if(residentRequest)await showOwnRequest({id:residentRequest.id,token:residentRequest.token});else if(notice)showNoticeAcknowledgement(notice);else if(group)showPaymentGroup(group);else if(paymentId)showReceipt(paymentId);}
+  try{await refresh();if(residentRequest)await showOwnRequest({id:residentRequest.id,token:residentRequest.token});else if(notice)showNoticeAcknowledgement(notice);else if(group)showPaymentGroup(group);else if(paymentId)showReceipt(paymentId);else await followNotification();}
   catch(err){error(new Error('İşlem tamamlandı, ekran yenilenemedi. Tekrar kaydetmeden önce sayfayı yenileyin. '+err.message));}
  }catch(err){$('#dialogError').textContent=err.message;}finally{button.disabled=false;}
 });
 $('#closeModal').addEventListener('click',()=>{if(!uploadingDocument)$('#modal').close();});
 $('#modal').addEventListener('cancel',e=>{if(uploadingDocument)e.preventDefault();});
+function openAdminLogin(){
+ openDialog('Yönetici girişi',input('email','Yönetici e-postası','email','','required autocomplete="username"')+input('password','Yönetici şifresi','password','','required autocomplete="current-password" maxlength="1024"')+'<p class="help">Bu cihazda oturumunuz açık kalır.</p>',async f=>{await api('login','POST',{email:f.get('email'),password:f.get('password')});toast('Yönetici paneli açıldı.');},'Giriş yap');
+}
+async function followNotification(){
+ const id=adminRequestFromHash(location.hash);if(!id)return false;
+ if(!state?.admin){openAdminLogin();toast('Arıza kaydını görmek için yönetici girişi yapın.');return false;}
+ tab='requests';requestFilter='all';
+ await refresh();
+ if(!state.admin){openAdminLogin();return false;}
+ if(requestError)throw new Error(requestError);
+ if(residentRequests.some(row=>row.id===id))showRequestDetail(id);
+ else openReadDialog('Arıza kaydı','<p>Bu kayıt artık listede bulunmuyor. Arıza ve talepler listesinden kontrol edebilirsiniz.</p>');
+ history.replaceState(null,'',location.href.split('#')[0]);
+ return true;
+}
 $('#auth').addEventListener('click',async()=>{
  if(state?.admin){try{await api('logout','POST',{});await refresh();toast('Yönetici oturumu kapatıldı.');}catch(e){error(e);}return;}
- openDialog('Yönetici girişi',input('email','Yönetici e-postası','email','','required autocomplete="username"')+input('password','Yönetici şifresi','password','','required autocomplete="current-password" maxlength="1024"'),async f=>{await api('login','POST',{email:f.get('email'),password:f.get('password')});toast('Yönetici paneli açıldı.');},'Giriş yap');
+ openAdminLogin();
 });
 document.addEventListener('change',e=>{
  if(e.target.id==='duesFilter'){duesFilter=e.target.value;selectedCharges.clear();render();$('#duesFilter').focus();}
@@ -582,6 +598,8 @@ const installApp=initPwa({showStatus:toast,showGuide:kind=>{
  const instructions=kind==='ios'?'<ol><li>Bu siteyi Safari’de aç.</li><li>Paylaş menüsünden <strong>Ana Ekrana Ekle</strong> seç.</li><li>Varsa <strong>Web Uygulaması Olarak Aç</strong> seçeneğini açıp <strong>Ekle</strong> düğmesine dokun.</li></ol>':kind==='android'?'<ol><li>Bu siteyi Chrome’da aç.</li><li>Sağ üstteki üç nokta menüsünden <strong>Uygulamayı yükle</strong> veya <strong>Ana ekrana ekle</strong> seç.</li><li>Yüklemeyi onayla.</li></ol>':'<p>Chrome veya Edge’in adres çubuğundaki yükleme simgesini ya da tarayıcı menüsündeki <strong>Uygulamayı yükle</strong> seçeneğini kullanabilirsin.</p><p>Telefonunda bu siteyi açarak aynı şekilde ana ekrana ekleyebilirsin.</p>';
  openReadDialog('Komşu’yu ana ekrana ekle',instructions);
 }});
-refresh().then(async()=>{const access=requestFromHash(location.hash);if(access)await showOwnRequest(access);}).catch(error);
+refresh().then(async()=>{const access=requestFromHash(location.hash);if(access)await showOwnRequest(access);else await followNotification();}).catch(error);
+window.addEventListener?.('storage',event=>{if(event.key===SESSION_KEY){$('#modal').close();refresh().then(()=>{if(state.admin)return followNotification();}).catch(error);}});
+window.addEventListener?.('hashchange',()=>{followNotification().catch(error);});
 setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&!$('#settingsForm')&&!$('#bankForm'))refresh().catch(error);},60000);
 
