@@ -1,3 +1,4 @@
+import {expenseUpdate} from '../public/expense-files.js';
 import {annualDues,filterAnnualDues,annualStatus,MONTHS} from '../public/annual-dues.js';
 import {createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus} from '../public/notice-tracking.js';
 import {createUnitPreference,MY_UNIT_KEY} from '../public/my-unit.js';
@@ -16,10 +17,10 @@ import {requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,req
 async function fixture(apiImpl){
  const elements=new Map(),requests=[],listeners={};
  const element=selector=>{
-  if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
+  if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,handlers:{},addEventListener(type,fn){this.handlers[type]=fn;},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,filterAnnualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({expenseUpdate,FormData:class {constructor(target){this.values=target.formValues;}get(key){return this.values[key]??null;}},Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,filterAnnualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> '11111111-1111-4111-8111-111111111111'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
@@ -209,4 +210,23 @@ test('Annual grid restores both scroll axes on data refresh while a different ye
  f.context.document.querySelector=selector=>selector==='.annual-scroll'?(++reads===1?old:fresh):query(selector);
  f.run('render()');assert.equal(fresh.scrollLeft,183);assert.equal(fresh.scrollTop,91);
  reads=0;fresh.scrollLeft=0;fresh.scrollTop=0;f.run('annualYear=2025;render()');assert.equal(fresh.scrollLeft,0);assert.equal(fresh.scrollTop,0);
+});
+
+test('Matching expense warning keeps draft and requires explicit separate-expense confirmation',async()=>{
+ const match={id:7,date:'2026-10-01',category:'Elektrik',description:'<test>',amount:5000};let calls=0;
+ const f=await fixture(()=>++calls===1?{duplicate:true,matches:[match]}:{ok:true});
+ f.run("state.categories=['Elektrik'];editExpense();");
+ const values={category:'Elektrik',description:'<test>',amount:'50',date:'2026-10-01'};f.context.form={get:k=>values[k]??null};
+ assert.equal(await f.run('dialogAction(form)'),false);assert.equal(f.element('#modal').open,true);
+ assert.match(f.element('#expenseDuplicateWarning').innerHTML,/&lt;test&gt;/);assert.equal(f.element('#dialogSubmit').textContent,'Yine de kaydet');
+ await assert.rejects(f.run('dialogAction(form)'),/kutuyu işaretleyin/);assert.equal(calls,1);
+ values.separateExpense='on';await f.run('dialogAction(form)');assert.equal(f.requests[1][2].separateExpense,true);assert.equal(f.requests[1][2].confirmedMatches[0].id,7);
+ f.run('expenseDuplicateReset()');assert.equal(f.element('#expenseDuplicateWarning').hidden,true);assert.equal(f.element('#dialogSubmit').textContent,'Kaydet');
+ f.run('state.admin=false');assert.throws(()=>f.run('editExpense()'),/Yönetici/);
+});
+test('Actual expense submit remains open without refreshing when server returns a duplicate',async()=>{
+ const f=await fixture(()=>({duplicate:true,matches:[{id:1,date:'2026-10-01',category:'Elektrik',description:'Test',amount:1000}]}));
+ f.run("state.categories=['Elektrik'];editExpense();refresh=async()=>{throw new Error('Should not refresh');};");
+ await f.element('#dialogForm').handlers.submit({preventDefault(){},target:{formValues:{category:'Elektrik',description:'Test',amount:'10',date:'2026-10-01'}}});
+ assert.equal(f.element('#modal').open,true);assert.equal(f.element('#dialogSubmit').disabled,false);assert.equal(f.requests.length,1);assert.equal(f.requests[0][0],'expenses/save');
 });
