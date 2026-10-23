@@ -219,3 +219,11 @@ Kararlar → karar ayrıntısı → **Okudum bildir** üzerinden daire/dükkân 
 Aynı bölümün aynı karar sürümüne tekrar bildirimi sayıyı veya ilk bildirim tarihini değiştirmez. Karar güncellenirse eski sürümün bildirimleri güncel sayıya eklenmez; arşivde yeni bildirim alınmaz. Yönetici yanlış bildirimi, güncel kayıt önizlemesiyle kaldırabilir. `apartman_private.decision_reads` doğrudan erişime kapalıdır; RLS/no-policy advisor bilgi notu bu RPC tasarımında beklenir. Yönetici JSON yedeğinde `decisionReads` bulunur. Finansal kayıtlar değişmez.
 
 CLI ile oluşturulan `20261022181202_decision_read_receipts.sql` ve `20261022181806_decision_read_backup.sql` uygulanmıştır. `verify-decision-read-receipts.sql` sentetik kayıtlarla tekrar, sürüm değişimi, arşiv, yönetici yetkisi, stale kaldırma, özel tablo erişimi, yedek ve finansal toplamları ROLLBACK içinde doğrular. Sözdizimi kontrolleri ve 93 Node testi geçti.
+
+## Dairem
+
+Ana menüde **Dairem** seçilerek daire/dükkân belirlenir. `komsu-apartman-unit-v1` anahtarı altında yalnızca bölüm kimliği bu cihazda tutulur; bakiye, kişi bilgisi veya kimlik doğrulama verisi saklanmaz. Seçim bir görüntüleme tercihidir ve erişim yetkisi vermez. Kalıcı depolama kapalıysa seçim mevcut sayfada kullanılabilir; kayıtlı bölüm artık yoksa seçim ekranı gösterilir. Daireyi değiştir her zaman erişilebilir; diğer sekmeler ve ortak takip ekranları korunur.
+
+Seçimi olan sakin sonraki uygulama açılışında doğrudan Dairem ekranına gelir. Yönetici açılışı genel özette kalır; bildirim/talep bağlantıları kendi kayıtlarını açmaya devam eder. Toplam kalan borç, İstanbul takvimindeki güncel ay, önceki aylar ve varsa gelecek aylar ayrı gösterilir. Muafiyet geçmiş borcu gizlemez. Bekleyen borçlar, daireye ait ödeme geçmişi/makbuzlar, hesap dökümü, mevcut ödeme hesabı ve dairesi seçili Ödeme yaptım formu aynı ekrandadır. Ödeme bildirmek otomatik tahsilat oluşturmaz.
+
+Doğrulama: sözdizimi kontrolleri ve 97 Node testi başarılı. Yeni testler cihazda seçimin yeniden açılması, geçersiz/silinmiş bölüm, kapalı depolama, eski borç/muafiyet, daireye göre borç ve makbuz ayrımı, ödeme bildirimi önseçimi ve sakin/yönetici başlangıç ekranını kontrol eder. Veritabanı değişikliği gerekmez.

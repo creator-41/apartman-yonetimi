@@ -46,3 +46,6 @@ header,main,#view{min-width:0;max-width:100%}
 .table-wrap{max-width:100%;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
 dialog{max-width:calc(100vw - 24px)}
 @media(max-width:650px){input,select,textarea{font-size:16px}}
+
+.my-unit-cards{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:600px){nav{grid-template-columns:repeat(5,minmax(0,1fr))}.my-unit-cards{grid-template-columns:1fr}.my-unit-cards .card{display:flex;align-items:center;justify-content:space-between;gap:12px}.my-unit-cards .number{margin:0;font-size:24px}}
