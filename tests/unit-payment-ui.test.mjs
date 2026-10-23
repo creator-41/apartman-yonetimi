@@ -1,3 +1,4 @@
+import {annualDues,annualStatus,MONTHS} from '../public/annual-dues.js';
 import {createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus} from '../public/notice-tracking.js';
 import {createUnitPreference,MY_UNIT_KEY} from '../public/my-unit.js';
 import {unitStatement} from '../public/reports.js';
@@ -18,7 +19,7 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> '11111111-1111-4111-8111-111111111111'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
@@ -182,4 +183,14 @@ test('Acknowledgement tracking button closes the dialog and opens the submitted 
  const btn={dataset:{action:'own-notices',id:'1'}};
  await f.listeners.click[0]({target:{closest:selector=>selector==='[data-action]'?btn:null},preventDefault(){}});
  assert.equal(f.element('#modal').open,false);assert.equal(f.run('tab'),'my-unit');assert.equal(f.run('unitPreference.get(state.units)'),1);assert.equal(f.requests.length,0);
+});
+
+
+test('Annual grid opens only the selected unit/month payments, escapes labels and shows missing dues without changing records',async()=>{
+ const f=await fixture();f.run("annualYear=2026;state.units.push({id:2,label:'Daire <2>'});state.payments=[{id:10,charge_id:1,date:'2027-01-02',amount:2500,note:'SECRET'}, {id:20,charge_id:2,date:'2026-01-02',amount:5000}];");
+ const html=f.run('annualDuesHTML()');assert.match(html,/Daire &lt;2&gt;/);assert.equal((html.match(/data-action="annual-month"/g)||[]).length,24);assert.match(html,/Excel’e indir/);assert.match(html,/Önceki yıl/);assert.match(html,/Sonraki yıl/);
+ f.run("showAnnualMonth(1,'2026-01')");let detail=f.element('#dialogFields').innerHTML;
+ assert.match(detail,/Kısmi/);assert.match(detail,/data-id="10"/);assert.doesNotMatch(detail,/data-id="20"|SECRET/);assert.match(detail,/2027/);
+ f.run("showAnnualMonth(2,'2026-01')");detail=f.element('#dialogFields').innerHTML;assert.match(detail,/aidat kaydı yok/);assert.doesNotMatch(detail,/data-action="receipt"/);
+ assert.throws(()=>f.run("showAnnualMonth(1,'2026-99')"),/Geçersiz/);assert.throws(()=>f.run("showAnnualMonth(99,'2026-01')"),/bulunamadı/);
 });
