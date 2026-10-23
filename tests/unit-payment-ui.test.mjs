@@ -13,19 +13,19 @@ import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from '
 import {requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange} from '../public/requests.js';
 
 async function fixture(apiImpl){
- const elements=new Map(),requests=[];
+ const elements=new Map(),requests=[],listeners={};
  const element=selector=>{
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
  const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
-  crypto:{randomUUID:()=> '11111111-1111-4111-8111-111111111111'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}},
+  crypto:{randomUUID:()=> '11111111-1111-4111-8111-111111111111'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
  source=source.replace(/^import .*;\n/gm,'').replace(/^refresh\(\)\.(?:then|catch).*$/m,'');
  vm.runInContext(source,context);
  vm.runInContext(`state={admin:true,units:[{id:1,label:'Daire 1'}],charges:[{id:2,unit_id:1,period:'2026-02',amount:10000,paid:0},{id:1,unit_id:1,period:'2026-01',amount:10000,paid:2500}],payments:[]};`,context);
- return {context,element,requests,run:code=>vm.runInContext(code,context)};
+ return {context,element,requests,listeners,run:code=>vm.runInContext(code,context)};
 }
 test('Administrator notification waits for login then opens its request and consumes the target',async()=>{
  const f=await fixture(),id='95f4f474-56fe-4e6f-8d5c-a1753341fd91';
@@ -173,4 +173,13 @@ test('Notice tracking credentials survive uncertain submission but are removed o
  f.run('openPaymentNotice(1)');f.context.form=new Map([['unitId','1'],['amount','1'],['date','2026-01-01'],['note','']]);
  await assert.rejects(()=>f.run('dialogAction(form)'));assert.equal(f.run('noticeBook.entries(1).length'),1);
  uncertain=false;await assert.rejects(()=>f.run('dialogAction(form)'));assert.equal(f.run('noticeBook.entries(1).length'),0);
+});
+
+
+test('Acknowledgement tracking button closes the dialog and opens the submitted unit without another submission',async()=>{
+ const f=await fixture();f.run("showNoticeAcknowledgement({id:'11111111-1111-4111-8111-111111111111',status:'pending',unitId:1,trackingSaved:true});refresh=async()=>{};");
+ assert.equal(f.element('#modal').open,true);
+ const btn={dataset:{action:'own-notices',id:'1'}};
+ await f.listeners.click[0]({target:{closest:selector=>selector==='[data-action]'?btn:null},preventDefault(){}});
+ assert.equal(f.element('#modal').open,false);assert.equal(f.run('tab'),'my-unit');assert.equal(f.run('unitPreference.get(state.units)'),1);assert.equal(f.requests.length,0);
 });

@@ -506,7 +506,7 @@ document.addEventListener('click',async e=>{
  else if(action==='receipt'){await refresh();showReceipt(id);}
  else if(action==='download-receipt'){btn.disabled=true;try{const current=await api('state');await downloadReceipt(paymentReceipt(current,id),receiptLink(location.href,id));}catch(err){$('#dialogError').textContent=err.message;}finally{btn.disabled=false;}}
  else if(action==='copy-receipt-link'){await copyPaymentText(receiptLink(location.href,id),'Makbuz bağlantısı kopyalandı.');}
- else if(action==='own-notices'){unitPreference.set(id,state.units);unitChooser=false;tab='my-unit';await refresh();}
+ else if(action==='own-notices'){$('#modal').close();unitPreference.set(id,state.units);unitChooser=false;tab='my-unit';await refresh();}
  else if(action==='refresh-own-notices'){await refresh();}
  else if(action==='choose-unit'){unitChooser=true;render();}
  else if(action==='cancel-unit-choice'){unitChooser=false;render();}
