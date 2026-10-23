@@ -246,3 +246,14 @@ Dairem'de toplam borç tek belirgin kartta, güncel ay ve önceki dönem tutarla
 Yönetici özeti bekleyen ödeme bildirimleri, açık arıza/talepler ve toplam alacak ile başlar. Önceki aylardan kalan tutar toplam alacağın altında görünür. Kuyruk yüklenemezse sıfır yerine alınamadı gösterilir. Ödeme al, gider ekle, aylık bilanço ve borçlu daireler doğrudan erişilebilir. Ayrıntılı mali kartlar/ay seçimi ve haberler açılır bölümlerdedir. Sakinlerin ortak özetindeki önceki dönem alacakları ve haber akışı korunur.
 
 Bu düzenleme yalnızca sunumu değiştirir; veritabanı migration'ı yoktur. Sözdizimi kontrolleri ve mevcut 103 Node testi başarılıdır.
+
+
+## Yıllık aidat çizelgesi
+
+Aidatlar → **Yıllık çizelge** tüm daire/dükkânların ocak–aralık durumunu gösterir. Ayı seçerek borçlandırma, ödenen, kalan ve o aidat ayına işlenmiş ödeme tarihleri/makbuzları açılır. 2000–2099 yılları arasında geçiş vardır; aylık ekranından girilince o ayın yılı açılır. Daire sütunu sabittir, geniş tablo kendi içinde kayar. Renklerin yanında Ödendi / Kısmi / Ödenmedi / Muaf / Kayıt yok / Henüz aidat yok metinleri vardır.
+
+Çizelge aidat dönemlerine göre güncel kayıtları gösterir; ödeme tarihine göre yıllık kasa tahsilat raporu değildir. Başka yılda ödenmiş bir aidat kendi döneminde ödenmiş görünür. Seçilen yılın borçlandırma, ödenen ve kalan toplamları kuruş üzerinden hesaplanır; devir borçları dahildir ve ayrıntıda belirtilir. Mevcut borç, dairenin güncel muafiyetiyle gizlenmez. Muafiyet geçmişte kaydı olmayan aylara geriye dönük atanmaz; kayıt olmayan bu ay ve sonraki aylar güncel karar uyarınca Muaf gösterilir. Borç kaydı olmayan aylar Ödenmedi sayılmaz.
+
+**Excel’e indir** güncel veriden gerçek `.xlsx` üretir: renkli Aidat çizelgesi ve sayısal TL sütunlarıyla Aidat ayrıntıları. İlk üç satır ve bölüm sütunu sabitlenir; filtreler vardır. Çizelgenin TOPLAM satırında ay sütunları kalan borcu gösterir. Daire etiketleri formül olarak çalıştırılmaz; malik/oturan veya yöneticiye özel notlar dosyaya eklenmez. Üretim tarayıcı içinde, dış bağımlılık/CDN olmadan yapılır. `annual-xlsx.js` SpreadsheetML ve ZIP STORE paketini oluşturur; yeni veritabanı işlemi yoktur.
+
+Doğrulama: sözdizimi kontrolleri ve 107 Node testi başarılı. Yeni kontroller yıl ayrımı, kuruş toplamları, kısmi ödeme, devir, geçmiş borç/muafiyet, kayıtsız/gelecek aylar, doğru aya/daireye ait makbuz, özel notların dışlanması ve güvenli metin hücrelerini kapsar. Üretilen örnek dosya bağımsız ZIP CRC kontrolü ve openpyxl ile açılarak iki sayfa, sabit başlık/filtreler, TL tutarları ve formül benzeri etiketin metin olarak kalması doğrulandı. Masaüstü Excel'de elle açma bu turda yapılmadı.
