@@ -1,3 +1,4 @@
+import {DOCUMENT_CATEGORIES,archiveFields,filterDocuments,uploadArchiveDocument} from './document-archive.js?v=archive-1';
 import {cashCheckAmounts,cashCheckResult} from './cash-check.js?v=cash-check-1';
 import {budgetSummary,budgetItem} from './budget.js?v=budget-1';
 import {annualDues,filterAnnualDues,annualStatus,MONTHS} from './annual-dues.js?v=grid-1';
@@ -20,7 +21,7 @@ import { openTasks, taskSave, statusName } from './work.js?v=request-1';
 import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=request-1';
 import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStatementText } from './reports.js?v=summary-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=cash-check-1';
+import { createApi } from './transport.js?v=archive-1';
 import { config } from './config.js?v=push-1';
 const noticeBook=createNoticeBook(window);
 let ownNotices=[],ownNoticeError="",ownNoticeLoad=0;
@@ -43,6 +44,7 @@ let unitPaymentContext=null,createdPaymentGroup=null;
 let paymentNotices=[],paymentNoticeError="",createdNoticeAcknowledgement=null;
 let residentRequests=[],requestError="",requestFilter="open",requestAccess=null,createdResidentRequest=null;
 let changeHistory=[],historyError="";
+let archiveRows=[],archiveError="",archiveLoading=false,archiveLoad=0,archiveAdmin=null,archiveQuery="",archiveCategory="",archiveRemoved=false;
 let cashCheckData=null,cashCheckError="",cashCheckLoading=false,cashCheckLoad=0,cashCheckPreview=null;
 let budgetPlan=null,budgetError="",budgetLoading=false,budgetLoad=0;
 'use strict';
@@ -58,6 +60,7 @@ const unitName=id=>state.units.find(u=>u.id===id)?.label||'Bölüm';
 const noticeHTML=n=>'<article class="notice"><h3>'+esc(n.title)+'</h3><p>'+esc(n.body)+'</p><small>'+dateName(n.created_at)+'</small>'+(state.admin?' <button class="small danger" data-action="delete-notice" data-id="'+n.id+'">Kaldır</button>':'')+'</article>';
 async function refresh(){
  state=await api('state');
+ if(archiveAdmin!==state.admin){archiveAdmin=state.admin;archiveLoad++;archiveRows=[];archiveError='';archiveLoading=false;archiveRemoved=false;}
  if(initialView){initialView=false;if(!userNavigated&&!state.admin&&unitPreference.get(state.units))tab='my-unit';}
  if(!state.admin){cashCheckLoad++;cashCheckData=null;cashCheckError='';cashCheckLoading=false;cashCheckPreview=null;budgetLoad++;budgetPlan=null;budgetError='';budgetLoading=false;changeHistory=[];paymentNotices=[];paymentNoticeError='';residentRequests=[];requestError='';if(['history','payment-notices','requests'].includes(tab))tab='overview';}
  else if(tab==='history'){try{changeHistory=await api('history');historyError='';}catch(e){changeHistory=[];historyError=e.message;}}
@@ -67,6 +70,7 @@ async function refresh(){
  $('#mode').textContent=state.admin?'Yönetici paneli':'Ortak takip ekranı';$('#auth').textContent=state.admin?'Çıkış yap':'Yönetici girişi';
  document.querySelectorAll('.admin-only').forEach(e=>e.hidden=!state.admin);
  if(!state.admin&&['units','settings','history','payment-notices','requests','budget','cash-check'].includes(tab))tab='overview';
+ if(tab==='archive')await loadArchive();
  if(tab==='cash-check'&&state.admin)await loadCashChecks();
  if(tab==='budget'&&state.admin)await loadBudget();
  if(tab==='my-unit')await loadOwnNotices();
@@ -310,7 +314,7 @@ function myUnitHTML(){
 }
 function moreLinks(){
  const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" '+(['request-new','push-settings'].includes(target)?'data-action="'+target+'"':'data-tab="'+target+'"')+'><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
- return '<section class="more-section"><h2>Bilgiler</h2>'+links([['push-settings','Bildirimler','Bu cihazın bildirimlerini yönet'],['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['cash-check','Kasa kontrolü','Banka, nakit ve kayıtlı kasa karşılaştırması'],['budget','Aidat yeterlilik hesabı','Düzenli giderler ve gereken aidat'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
+ return '<section class="more-section"><h2>Bilgiler</h2>'+links([['push-settings','Bildirimler','Bu cihazın bildirimlerini yönet'],['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['archive','Belge arşivi','Yönetim planı, sözleşmeler ve dosyalar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['cash-check','Kasa kontrolü','Banka, nakit ve kayıtlı kasa karşılaştırması'],['budget','Aidat yeterlilik hesabı','Düzenli giderler ve gereken aidat'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
 }
 function pendingUnits(){return state.units.map(u=>({u,total:state.charges.filter(c=>c.unit_id===u.id).reduce((sum,c)=>sum+c.amount-c.paid,0)})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total||a.u.id-b.u.id);}
 function pendingRows(rows){return rows.map(({u,total})=>'<button class="pending-row" data-action="unit-detail" data-id="'+u.id+'"><strong>'+esc(u.label)+'</strong><span>'+money(total)+' <span aria-hidden="true">›</span></span></button>').join('');}
@@ -343,7 +347,7 @@ function showAnnualMonth(id,period){
 }
 function render(){
  const oldGrid=$('.annual-scroll'),gridPosition=tab==='annual-dues'&&oldGrid?.dataset?.year===String(annualYear)?{left:oldGrid.scrollLeft,top:oldGrid.scrollTop}:null;
- document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='dues'&&tab==='annual-dues')||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news','history','payment-notices','requests'].includes(tab))));
+ document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='dues'&&tab==='annual-dues')||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news','history','payment-notices','requests','archive','budget','cash-check'].includes(tab))));
  const view=$('#view'),charges=state.charges.filter(c=>c.period===selectedMonth),expenses=state.expenses.filter(e=>e.date.startsWith(selectedMonth));
  if(tab==='annual-dues'){view.innerHTML=annualDuesHTML();
  }else if(tab==='my-unit'){view.innerHTML=myUnitHTML();
@@ -367,6 +371,8 @@ function render(){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Apartmandan haberler</h2></div>'+newsHTML()+'</section>';
  }else if(tab==='decisions'||tab==='tasks'){
   view.innerHTML=workHTML();
+ }else if(tab==='archive'){
+  view.innerHTML=archiveHTML();
  }else if(tab==='cash-check'&&state.admin){
   view.innerHTML=cashChecksHTML();
  }else if(tab==='budget'&&state.admin){
@@ -404,6 +410,35 @@ function shareButtons(){return '<div class="actions report-actions"><button type
 function downloadText(text,name){
  const url=URL.createObjectURL(new Blob(['\uFEFF'+text],{type:'text/plain;charset=utf-8'}));
  const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function loadArchive(){
+ const request=++archiveLoad,admin=state.admin;
+ try{const rows=await api('documents');if(request===archiveLoad&&state.admin===admin){archiveRows=rows;archiveError='';}}
+ catch(e){if(request===archiveLoad){archiveRows=[];archiveError=e.message;}}
+ finally{if(request===archiveLoad)archiveLoading=false;}
+}
+function archiveHTML(){
+ const title='<div class="toolbar"><h2>Belge arşivi</h2><div class="actions"><button class="outline small" data-action="archive-retry">Yenile</button>'+(state.admin?'<button class="outline small" data-action="archive-view">'+(archiveRemoved?'Güncel belgeler':'Kaldırılanlar')+'</button><button class="primary" data-action="archive-add">Belge ekle</button>':'')+'</div></div>';
+ if(archiveLoading)return title+'<p class="empty">Belgeler yükleniyor…</p>';
+ if(archiveError)return title+'<p class="note" role="alert">Belgeler alınamadı. '+esc(archiveError)+'</p>';
+ const visible=state.admin?archiveRows:archiveRows.filter(d=>d.uploaded&&d.shared&&!d.archived),rows=filterDocuments(visible,{query:archiveQuery,category:archiveCategory,archived:state.admin&&archiveRemoved});
+ const filters='<div class="annual-filters"><div><label for="archiveSearch">Belge ara</label><input id="archiveSearch" type="search" maxlength="120" placeholder="Belge adı veya dosya adı" value="'+esc(archiveQuery)+'"></div><div><label for="archiveCategory">Kategori</label><select id="archiveCategory"><option value="">Tüm kategoriler</option>'+DOCUMENT_CATEGORIES.map(c=>'<option '+(archiveCategory===c?'selected':'')+'>'+esc(c)+'</option>').join('')+'</select></div></div>';
+ return title+'<section class="panel">'+filters+'<p class="help">'+(state.admin&&archiveRemoved?'Kaldırılan belgeler · ':'')+rows.length+' belge</p>'+rows.map(d=>'<article class="receipt"><strong>'+esc(d.title)+'</strong><small>'+esc(d.category)+' · '+esc(d.file_name)+' · '+(d.bytes/1048576).toLocaleString('tr-TR',{maximumFractionDigits:1})+' MB · '+dateName(d.created_at)+'</small>'+(state.admin?'<small>'+(!d.uploaded?'Yükleme tamamlanmadı':d.shared?'Herkes görebilir':'Yalnızca yönetici')+'</small>':'')+'<div class="actions">'+(d.uploaded?'<button class="outline small" data-action="archive-open" data-document-id="'+d.id+'">Görüntüle</button>':'')+(state.admin?(d.archived?'<button class="outline small" data-action="archive-restore" data-document-id="'+d.id+'">Geri al</button>':(d.uploaded?'<button class="outline small" data-action="archive-edit" data-document-id="'+d.id+'">Düzenle / Görünürlük</button>':'<button class="outline small" data-action="archive-complete" data-document-id="'+d.id+'">Yüklemeyi doğrula</button>')+'<button class="danger small" data-action="archive-remove" data-document-id="'+d.id+'">Kaldır</button>'):'')+'</div></article>').join('')+(!rows.length?'<p class="empty">'+(archiveQuery||archiveCategory?'Aramaya uygun belge yok.':'Henüz görüntülenecek belge yok.')+'</p>':'')+'</section>';
+}
+function editArchiveDocument(doc=null){
+ if(!state.admin)throw new Error('Yönetici girişi gerekli.');
+ const snapshot=doc?{...doc}:null;let uploadId=crypto.randomUUID(),previousKey=null,previousFile=null;
+ const fields=input('title','Belge başlığı','text',doc?.title||'','required maxlength="120"')+'<label for="f-category">Kategori</label><select id="f-category" name="category">'+DOCUMENT_CATEGORIES.map(c=>'<option '+(doc?.category===c?'selected':'')+'>'+esc(c)+'</option>').join('')+'</select><label for="f-shared">Kim görebilsin?</label><select id="f-shared" name="shared"><option value="private" '+(!doc?.shared?'selected':'')+'>Yalnızca yönetici</option><option value="shared" '+(doc?.shared?'selected':'')+'>Herkes görebilsin</option></select>'+(doc?'':'<label for="archiveFile">Dosya</label><input id="archiveFile" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required><p class="help">PDF, JPG, PNG veya WEBP · En fazla 10 MB.</p>');
+ openDialog(doc?'Belgeyi düzenle':'Belge ekle',fields,async f=>{
+  const values=archiveFields(f.get('title'),f.get('category'),f.get('shared')==='shared');
+  if(snapshot)await api('documents/manage','POST',{operation:'update',id:snapshot.id,expectedVersion:snapshot.version,...values});
+  else{
+   const file=$('#archiveFile')?.files?.[0],key=JSON.stringify(values);if(previousKey!==null&&(previousKey!==key||previousFile!==file))uploadId=crypto.randomUUID();previousKey=key;previousFile=file;
+   uploadingDocument=true;$('#closeModal').disabled=true;
+   try{await uploadArchiveDocument(api,{id:uploadId,...values},file);}finally{uploadingDocument=false;$('#closeModal').disabled=false;}
+  }
+  toast('Belge kaydedildi.');
+ },doc?'Kaydet':'Belgeyi yükle');
 }
 async function loadCashChecks(){
  const request=++cashCheckLoad;
@@ -545,7 +580,7 @@ function manageCharges(mode,ids){
  },mode==='edit'?'Değişiklikleri kaydet':'Seçili aidatları sil');
  chargeDialogContext={mode,rows};updateChargePreview();
 }
-document.addEventListener('input',e=>{if(['f-bank','f-cash'].includes(e.target.id))cashCheckPreview?.();if(['f-description','f-amount','f-date'].includes(e.target.id))expenseDuplicateReset?.();if(e.target.id==='annualSearch'){updateAnnualSearch(e);return;}if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
+document.addEventListener('input',e=>{if(e.target.id==='archiveSearch'){if(e.isComposing)return;const pos=e.target.selectionStart;archiveQuery=e.target.value;render();const el=$('#archiveSearch');el.focus();if(pos!==null)el.setSelectionRange(pos,pos);return;}if(['f-bank','f-cash'].includes(e.target.id))cashCheckPreview?.();if(['f-description','f-amount','f-date'].includes(e.target.id))expenseDuplicateReset?.();if(e.target.id==='annualSearch'){updateAnnualSearch(e);return;}if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
 $('#dialogForm').addEventListener('submit',async e=>{
  e.preventDefault();if(!dialogAction)return;const button=$('#dialogSubmit');button.disabled=true;
  try{
@@ -576,7 +611,7 @@ $('#auth').addEventListener('click',async()=>{
  if(state?.admin){try{await api('logout','POST',{});await refresh();toast('Yönetici oturumu kapatıldı.');}catch(e){error(e);}return;}
  openAdminLogin();
 });
-document.addEventListener('change',e=>{if(['f-category','f-description','f-amount','f-date'].includes(e.target.id))expenseDuplicateReset?.();
+document.addEventListener('change',e=>{if(e.target.id==='archiveCategory'){archiveCategory=e.target.value;render();return;}if(['f-category','f-description','f-amount','f-date'].includes(e.target.id))expenseDuplicateReset?.();
  if(e.target.id==='annualDebtOnly'){annualDebtOnly=e.target.checked;render();$('#annualDebtOnly').focus();}
  else if(e.target.id==='annualYear'){const year=Number(e.target.value);if(!Number.isInteger(year)||year<2000||year>2099){e.target.value=annualYear;error(new Error('2000–2099 arasında bir yıl seçin.'));return;}annualYear=year;render();}
  else if(e.target.id==='duesFilter'){duesFilter=e.target.value;selectedCharges.clear();render();$('#duesFilter').focus();}
@@ -601,13 +636,27 @@ document.addEventListener('submit',async e=>{
  try{const f=new FormData(e.target);await api('settings','PUT',{name:f.get('name'),monthlyDues:Number(f.get('monthlyDues')),openingBalance:Number(f.get('openingBalance'))});await refresh();toast('Ayarlar kaydedildi.');}catch(err){error(err);}finally{button.disabled=false;}
 });
 document.addEventListener('click',async e=>{
- const nav=e.target.closest('[data-tab]');if(nav){userNavigated=true;if(nav.dataset.tab==='annual-dues'&&tab==='dues')annualYear=Number(selectedMonth.slice(0,4));tab=nav.dataset.tab;if(!state){$('#view').innerHTML='<p class="empty">Kayıtlar yükleniyor…</p>';return;}if(tab==='cash-check'){if(!state.admin){tab='overview';render();return;}cashCheckData=null;cashCheckLoading=true;render();await loadCashChecks();render();}else if(tab==='budget'){if(!state.admin){tab='overview';render();return;}budgetPlan=null;budgetLoading=true;render();await loadBudget();render();}else if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
+ const nav=e.target.closest('[data-tab]');if(nav){userNavigated=true;if(nav.dataset.tab==='annual-dues'&&tab==='dues')annualYear=Number(selectedMonth.slice(0,4));tab=nav.dataset.tab;if(!state){$('#view').innerHTML='<p class="empty">Kayıtlar yükleniyor…</p>';return;}if(tab==='archive'){archiveRows=[];archiveLoading=true;render();await loadArchive();render();}else if(tab==='cash-check'){if(!state.admin){tab='overview';render();return;}cashCheckData=null;cashCheckLoading=true;render();await loadCashChecks();render();}else if(tab==='budget'){if(!state.admin){tab='overview';render();return;}budgetPlan=null;budgetLoading=true;render();await loadBudget();render();}else if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
  const btn=e.target.closest('[data-action]');if(!btn)return;
  e.preventDefault();
  const action=btn.dataset.action,id=Number(btn.dataset.id);
  if(uploadingDocument)return;
  try{
- if(action==='cash-check-retry'){cashCheckLoading=true;render();await loadCashChecks();render();}
+ if(action==='archive-retry'){archiveLoading=true;render();await loadArchive();render();}
+ else if(action==='archive-view'){archiveRemoved=state.admin&&!archiveRemoved;render();}
+ else if(action==='archive-add'){editArchiveDocument();}
+ else if(['archive-edit','archive-remove','archive-restore','archive-complete','archive-open'].includes(action)){
+  const doc=archiveRows.find(d=>d.id===btn.dataset.documentId);if(!doc)throw new Error('Belge bulunamadı. Listeyi yenileyin.');
+  if(action==='archive-edit')editArchiveDocument(doc);
+  else if(action==='archive-open'){
+   btn.disabled=true;try{const result=await api('archive-files/sign','POST',{path:doc.path}),link=document.createElement('a');link.href=result.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Belgeyi aç';link.className='outline small';if(btn.nextElementSibling?.matches('a'))btn.nextElementSibling.remove();btn.after(link);link.click();}finally{btn.disabled=false;}
+  }else{
+   if(!state.admin)throw new Error('Yönetici girişi gerekli.');
+   const operation=action==='archive-complete'?'complete':action==='archive-restore'?'restore':'archive';
+   openDialog(operation==='complete'?'Yüklemeyi doğrula':operation==='restore'?'Belgeyi geri al':'Belgeyi kaldır','<p><strong>'+esc(doc.title)+'</strong></p><p>'+(operation==='complete'?'Yüklenen dosya kontrol edilecek.':operation==='restore'?(doc.uploaded&&doc.shared?'Belge herkesin görebileceği şekilde arşive geri alınacak.':'Belge arşive geri alınacak.'):'Belge ortak listeden kaldırılacak. Kaldırılanlar listesinden geri alabilirsiniz.')+'</p>',async()=>{await api('documents/manage','POST',{operation,id:doc.id,expectedVersion:doc.version});toast('Belge arşivi güncellendi.');},operation==='complete'?'Doğrula':operation==='restore'?'Geri al':'Kaldır');
+  }
+ }
+ else if(action==='cash-check-retry'){cashCheckLoading=true;render();await loadCashChecks();render();}
  else if(action==='cash-check-new'){newCashCheck();}
  else if(action==='budget-retry'){budgetLoading=true;render();await loadBudget();render();}
  else if(action==='budget-add'||action==='budget-edit'){editBudgetItem(action==='budget-edit'?id:null);}
@@ -788,7 +837,7 @@ window.addEventListener?.('storage',event=>{if(event.key===SESSION_KEY){$('#moda
 window.addEventListener?.('storage',event=>{if(event.key===MY_UNIT_KEY||event.key===null){unitPreference.sync(event.key===null?null:event.newValue);if(state&&tab==='my-unit')render();}});
 window.addEventListener?.('storage',event=>{if(event.key===NOTICE_TRACKING_KEY||event.key===null){noticeBook.sync(event.key===null?null:event.newValue);if(state&&tab==='my-unit')refresh().catch(error);}});
 window.addEventListener?.('hashchange',()=>{followNotification().catch(error);});
-setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&document.activeElement?.id!=='annualYear'&&document.activeElement?.id!=='annualSearch'&&!$('#settingsForm')&&!$('#bankForm')&&!$('#myUnitForm'))refresh().catch(error);},60000);
+setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&document.activeElement?.id!=='annualYear'&&document.activeElement?.id!=='annualSearch'&&document.activeElement?.id!=='archiveSearch'&&!$('#settingsForm')&&!$('#bankForm')&&!$('#myUnitForm'))refresh().catch(error);},60000);
 
 
 // iOS may ignore viewport zoom limits. Block only zoom gestures, preserving one-finger scrolling.
