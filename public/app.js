@@ -1,5 +1,5 @@
-import {annualDues,annualStatus,MONTHS} from './annual-dues.js?v=annual-1';
-import {downloadAnnualWorkbook} from './annual-xlsx.js?v=annual-1';
+import {annualDues,filterAnnualDues,annualStatus,MONTHS} from './annual-dues.js?v=grid-1';
+import {downloadAnnualWorkbook} from './annual-xlsx.js?v=grid-1';
 import { createNoticeBook, NOTICE_TRACKING_KEY, ownNoticeStatus } from './notice-tracking.js?v=track-1';
 import { createUnitPreference, MY_UNIT_KEY } from './my-unit.js?v=unit-1';
 import { decisionReadPayload } from './decision-reads.js?v=reads-1';
@@ -43,7 +43,7 @@ let residentRequests=[],requestError="",requestFilter="open",requestAccess=null,
 let changeHistory=[],historyError="";
 'use strict';
 let state,tab='overview',selectedMonth=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit'}).format(new Date()),dialogAction;
-let annualYear=Number(selectedMonth.slice(0,4));
+let annualYear=Number(selectedMonth.slice(0,4)),annualQuery="",annualDebtOnly=false,userNavigated=false;
 const $=s=>document.querySelector(s);
 const money=v=>new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:2}).format(v/100);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -54,7 +54,7 @@ const unitName=id=>state.units.find(u=>u.id===id)?.label||'Bölüm';
 const noticeHTML=n=>'<article class="notice"><h3>'+esc(n.title)+'</h3><p>'+esc(n.body)+'</p><small>'+dateName(n.created_at)+'</small>'+(state.admin?' <button class="small danger" data-action="delete-notice" data-id="'+n.id+'">Kaldır</button>':'')+'</article>';
 async function refresh(){
  state=await api('state');
- if(initialView){initialView=false;if(!state.admin&&unitPreference.get(state.units))tab='my-unit';}
+ if(initialView){initialView=false;if(!userNavigated&&!state.admin&&unitPreference.get(state.units))tab='my-unit';}
  if(!state.admin){changeHistory=[];paymentNotices=[];paymentNoticeError='';residentRequests=[];requestError='';if(['history','payment-notices','requests'].includes(tab))tab='overview';}
  else if(tab==='history'){try{changeHistory=await api('history');historyError='';}catch(e){changeHistory=[];historyError=e.message;}}
  if(state.admin){try{paymentNotices=await api('payment-notices');paymentNoticeError='';}catch(e){paymentNoticeError=e.message;}}
@@ -134,7 +134,8 @@ function updateUnitSearch(e){
  const position=e.target.selectionStart;unitQuery=e.target.value;selectedCharges.clear();render();
  const search=$('#unitSearch');search.focus();if(position!==null)search.setSelectionRange(position,position);
 }
-document.addEventListener('compositionend',e=>{if(e.target.id==='unitSearch')updateUnitSearch(e);});
+function updateAnnualSearch(e){if(e.isComposing)return;const position=e.target.selectionStart;annualQuery=e.target.value;render();const input=$('#annualSearch');input.focus();if(position!==null)input.setSelectionRange(position,position);const grid=$('.annual-scroll');if(grid)grid.scrollTop=0;}
+document.addEventListener('compositionend',e=>{if(e.target.id==='unitSearch')updateUnitSearch(e);else if(e.target.id==='annualSearch')updateAnnualSearch(e);});
 function requestEntry(){return '<button type="button" class="outline" data-action="request-new">Arıza / talep bildir</button>';}
 function requestQueueCard(){
  if(!state.admin)return '';
@@ -322,10 +323,10 @@ function overviewHTML(){
  return '<div class="toolbar overview-toolbar"><h2>Apartman özeti</h2>'+monthFilter()+'</div>'+cards()+'<div class="overview-actions">'+(state.admin?'<button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button>':'')+'<button class="outline" data-tab="report">Aylık bilanço</button>'+(!state.admin?noticeEntryButton()+requestEntry():'')+'</div>'+noticeQueueCard()+requestQueueCard()+'<section class="panel dues-summary"><div class="toolbar"><h3>Bu ayın aidatları</h3><span class="muted">'+paidCount+' / '+charges.length+' bölüm ödedi</span></div><progress max="'+(expected||1)+'" value="'+paid+'" aria-label="Aidat tahsilat oranı"></progress><div class="dues-summary-values"><span>Beklenen <strong>'+money(expected)+'</strong></span><span>Kalan <strong>'+money(expected-paid)+'</strong></span></div>'+(!charges.length?'<p class="help">Bu ay aidat oluşturulmamış.</p>':'')+'</section><div class="overview-columns"><section class="panel"><div class="toolbar"><h2>Ödeme bekleyenler</h2>'+(pending.length>3?'<button class="small outline" data-action="show-pending">Tümü ('+pending.length+')</button>':'')+'</div>'+pendingRows(pending.slice(0,3))+(pending.length?'':'<p class="muted">Bekleyen aidat borcu yok.</p>')+'</section><section class="panel compact-news"><div class="toolbar"><h2>Apartmandan haberler</h2><button class="small outline" data-tab="news">Tümü</button></div>'+newsHTML(1,true)+'</section></div>'+(tasks.length?'<section class="panel summary-tasks"><div class="toolbar"><h2>Yapılacak işler</h2><button class="small outline" data-tab="tasks">Tümü ('+tasks.length+')</button></div>'+tasks.slice(0,3).map(taskRow).join('')+'</section>':'');
 }
 function annualDuesHTML(){
- const report=annualDues(state,annualYear,today().slice(0,7));
+ const full=annualDues(state,annualYear,today().slice(0,7)),report=filterAnnualDues(full,{query:annualQuery,debtOnly:annualDebtOnly});
  const years='<div class="year-picker"><button class="outline small" data-action="previous-year" aria-label="Önceki yıl" '+(annualYear===2000?'disabled':'')+'>‹</button><label for="annualYear">Yıl <input id="annualYear" type="number" inputmode="numeric" min="2000" max="2099" step="1" value="'+annualYear+'"></label><button class="outline small" data-action="next-year" aria-label="Sonraki yıl" '+(annualYear===2099?'disabled':'')+'>›</button></div>';
  const cells=row=>row.cells.map(c=>'<td><button type="button" class="annual-cell '+c.status+'" data-action="annual-month" data-id="'+row.unitId+'" data-period="'+c.period+'" aria-label="'+esc(row.label+' · '+monthName(c.period)+' · '+annualStatus(c.status)+(c.chargeId?' · Kalan '+money(c.remaining):''))+'"><span>'+esc(annualStatus(c.status))+'</span>'+(c.chargeId?'<small>'+money(c.remaining>0?c.remaining:c.amount)+'</small>':'')+'</button></td>').join('');
- return '<section class="panel"><div class="toolbar"><h2>Yıllık aidat çizelgesi</h2><div class="actions">'+years+'<button class="outline" data-tab="dues">Aylık aidatlar</button><button class="primary" data-action="export-annual">Excel’e indir</button></div></div><div class="balance-cards">'+[['Borçlandırma',report.amount],['Ödenen',report.paid],['Kalan',report.remaining]].map(([title,value])=>'<div><span>'+title+'</span><strong>'+money(value)+'</strong></div>').join('')+'</div><p class="help">Aidat ayına göre güncel durum. Muaf: güncel yönetim kararı. Ayrıntı için aya dokunun; diğer aylar için tabloyu yana kaydırın.</p><div class="table-wrap annual-scroll"><table class="annual-table"><caption>'+annualYear+' · Dairelerin aylık aidat durumu</caption><thead><tr><th scope="col">Daire / dükkân</th>'+MONTHS.map(m=>'<th scope="col">'+m+'</th>').join('')+'<th scope="col">Kalan</th></tr></thead><tbody>'+report.rows.map(row=>'<tr><th scope="row">'+esc(row.label)+'</th>'+cells(row)+'<td class="amount"><strong>'+money(row.remaining)+'</strong></td></tr>').join('')+'</tbody><tfoot><tr><th scope="row">Kalan toplamı</th>'+report.months.map(c=>'<td class="amount">'+money(c.remaining)+'</td>').join('')+'<td class="amount"><strong>'+money(report.remaining)+'</strong></td></tr></tfoot></table></div>'+(!report.rows.length?'<p class="empty">Henüz daire kaydı yok.</p>':'')+'</section>';
+ return '<section class="panel"><div class="toolbar"><h2>Yıllık aidat çizelgesi</h2><div class="actions">'+years+'<button class="outline" data-tab="dues">Aylık aidatlar</button><button class="primary" data-action="export-annual">Excel’e indir</button></div></div><div class="annual-filters"><div><label for="annualSearch">Daire / dükkân ara</label><input id="annualSearch" type="search" maxlength="60" autocomplete="off" placeholder="Örn. Daire 3" value="'+esc(annualQuery)+'"></div><label class="check"><input id="annualDebtOnly" type="checkbox"'+(annualDebtOnly?' checked':'')+'> Yalnızca borcu olanlar</label>'+((annualQuery||annualDebtOnly)?'<button class="outline small" data-action="clear-annual-filter">Temizle</button>':'')+'</div><p class="help">'+report.rows.length+' / '+full.rows.length+' bölüm · Toplamlar ve Excel görünen dairelere aittir.</p><div class="balance-cards">'+[['Borçlandırma',report.amount],['Ödenen',report.paid],['Kalan',report.remaining]].map(([title,value])=>'<div><span>'+title+'</span><strong>'+money(value)+'</strong></div>').join('')+'</div><p class="help">Aidat ayına göre güncel durum. Muaf: güncel yönetim kararı. Ayrıntı için aya dokunun; diğer aylar için tabloyu yana kaydırın.</p><div class="table-wrap annual-scroll" data-year="'+annualYear+'"><table class="annual-table"><caption>'+annualYear+' · Dairelerin aylık aidat durumu</caption><thead><tr><th scope="col">Daire / dükkân</th>'+MONTHS.map(m=>'<th scope="col">'+m+'</th>').join('')+'<th scope="col">Kalan</th></tr></thead><tbody>'+report.rows.map(row=>'<tr><th scope="row">'+esc(row.label)+'</th>'+cells(row)+'<td class="amount"><strong>'+money(row.remaining)+'</strong></td></tr>').join('')+'</tbody><tfoot><tr><th scope="row">Kalan toplamı</th>'+report.months.map(c=>'<td class="amount">'+money(c.remaining)+'</td>').join('')+'<td class="amount"><strong>'+money(report.remaining)+'</strong></td></tr></tfoot></table></div>'+(!report.rows.length?'<p class="empty">'+(full.rows.length?'Filtreye uygun daire bulunamadı.':'Henüz daire kaydı yok.')+'</p>':'')+'</section>';
 }
 function showAnnualMonth(id,period){
  if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(period))throw new Error('Geçersiz aidat ayı.');
@@ -335,6 +336,7 @@ function showAnnualMonth(id,period){
  openReadDialog(row.label+' · '+monthName(period),body);
 }
 function render(){
+ const oldGrid=$('.annual-scroll'),gridPosition=tab==='annual-dues'&&oldGrid?.dataset?.year===String(annualYear)?{left:oldGrid.scrollLeft,top:oldGrid.scrollTop}:null;
  document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='dues'&&tab==='annual-dues')||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news','history','payment-notices','requests'].includes(tab))));
  const view=$('#view'),charges=state.charges.filter(c=>c.period===selectedMonth),expenses=state.expenses.filter(e=>e.date.startsWith(selectedMonth));
  if(tab==='annual-dues'){view.innerHTML=annualDuesHTML();
@@ -376,6 +378,7 @@ function render(){
  }
  if(tab==='settings'&&state.admin)view.innerHTML=bankForm()+view.innerHTML;
 
+ if(gridPosition){const grid=$('.annual-scroll');if(grid){grid.scrollLeft=gridPosition.left;grid.scrollTop=gridPosition.top;}}
  syncChargeSelection();
 }
 const input=(name,label,type='text',value='',extra='')=>'<label for="f-'+name+'">'+label+'</label><input id="f-'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'>';
@@ -471,7 +474,7 @@ function manageCharges(mode,ids){
  },mode==='edit'?'Değişiklikleri kaydet':'Seçili aidatları sil');
  chargeDialogContext={mode,rows};updateChargePreview();
 }
-document.addEventListener('input',e=>{if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
+document.addEventListener('input',e=>{if(e.target.id==='annualSearch'){updateAnnualSearch(e);return;}if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
 $('#dialogForm').addEventListener('submit',async e=>{
  e.preventDefault();if(!dialogAction)return;const button=$('#dialogSubmit');button.disabled=true;
  try{
@@ -503,7 +506,8 @@ $('#auth').addEventListener('click',async()=>{
  openAdminLogin();
 });
 document.addEventListener('change',e=>{
- if(e.target.id==='annualYear'){const year=Number(e.target.value);if(!Number.isInteger(year)||year<2000||year>2099){e.target.value=annualYear;error(new Error('2000–2099 arasında bir yıl seçin.'));return;}annualYear=year;render();}
+ if(e.target.id==='annualDebtOnly'){annualDebtOnly=e.target.checked;render();$('#annualDebtOnly').focus();}
+ else if(e.target.id==='annualYear'){const year=Number(e.target.value);if(!Number.isInteger(year)||year<2000||year>2099){e.target.value=annualYear;error(new Error('2000–2099 arasında bir yıl seçin.'));return;}annualYear=year;render();}
  else if(e.target.id==='duesFilter'){duesFilter=e.target.value;selectedCharges.clear();render();$('#duesFilter').focus();}
  else if(e.target.id==='requestFilter'){requestFilter=e.target.value;render();}
  else if(e.target.id==='workFilter'){workFilter=e.target.value;render();}
@@ -526,7 +530,7 @@ document.addEventListener('submit',async e=>{
  try{const f=new FormData(e.target);await api('settings','PUT',{name:f.get('name'),monthlyDues:Number(f.get('monthlyDues')),openingBalance:Number(f.get('openingBalance'))});await refresh();toast('Ayarlar kaydedildi.');}catch(err){error(err);}finally{button.disabled=false;}
 });
 document.addEventListener('click',async e=>{
- const nav=e.target.closest('[data-tab]');if(nav){if(nav.dataset.tab==='annual-dues'&&tab==='dues')annualYear=Number(selectedMonth.slice(0,4));tab=nav.dataset.tab;if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
+ const nav=e.target.closest('[data-tab]');if(nav){userNavigated=true;if(nav.dataset.tab==='annual-dues'&&tab==='dues')annualYear=Number(selectedMonth.slice(0,4));tab=nav.dataset.tab;if(!state){$('#view').innerHTML='<p class="empty">Kayıtlar yükleniyor…</p>';return;}if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
  const btn=e.target.closest('[data-action]');if(!btn)return;
  e.preventDefault();
  const action=btn.dataset.action,id=Number(btn.dataset.id);
@@ -539,7 +543,8 @@ document.addEventListener('click',async e=>{
  }
  else if(action==='previous-year'||action==='next-year'){const next=annualYear+(action==='next-year'?1:-1);if(next>=2000&&next<=2099){annualYear=next;render();}}
  else if(action==='annual-month'){await refresh();showAnnualMonth(id,btn.dataset.period);}
- else if(action==='export-annual'){btn.disabled=true;try{const year=annualYear;const current=await api('state');downloadAnnualWorkbook(current,year,today().slice(0,7));toast('Excel çizelgesi indirildi.');}finally{btn.disabled=false;}}
+ else if(action==='clear-annual-filter'){annualQuery='';annualDebtOnly=false;render();$('#annualSearch').focus();}
+ else if(action==='export-annual'){btn.disabled=true;try{const year=annualYear,filters={query:annualQuery,debtOnly:annualDebtOnly};const current=await api('state');downloadAnnualWorkbook(current,year,today().slice(0,7),filters);toast('Excel çizelgesi indirildi.');}finally{btn.disabled=false;}}
  else if(action==='install-app'){btn.disabled=true;try{await installApp();}finally{btn.disabled=false;}}
  else if(action==='clear-dues-filter'){unitQuery='';duesFilter='all';selectedCharges.clear();render();$('#unitSearch').focus();}
  else if(action==='toggle-bulk'){bulkMode=!bulkMode;selectedCharges.clear();render();}
@@ -707,7 +712,7 @@ window.addEventListener?.('storage',event=>{if(event.key===SESSION_KEY){$('#moda
 window.addEventListener?.('storage',event=>{if(event.key===MY_UNIT_KEY||event.key===null){unitPreference.sync(event.key===null?null:event.newValue);if(state&&tab==='my-unit')render();}});
 window.addEventListener?.('storage',event=>{if(event.key===NOTICE_TRACKING_KEY||event.key===null){noticeBook.sync(event.key===null?null:event.newValue);if(state&&tab==='my-unit')refresh().catch(error);}});
 window.addEventListener?.('hashchange',()=>{followNotification().catch(error);});
-setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&document.activeElement?.id!=='annualYear'&&!$('#settingsForm')&&!$('#bankForm')&&!$('#myUnitForm'))refresh().catch(error);},60000);
+setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&document.activeElement?.id!=='annualYear'&&document.activeElement?.id!=='annualSearch'&&!$('#settingsForm')&&!$('#bankForm')&&!$('#myUnitForm'))refresh().catch(error);},60000);
 
 
 // iOS may ignore viewport zoom limits. Block only zoom gestures, preserving one-finger scrolling.

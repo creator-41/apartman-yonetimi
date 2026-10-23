@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {annualDues} from '../public/annual-dues.js';
+import {annualDues,filterAnnualDues} from '../public/annual-dues.js';
 import {annualWorkbook} from '../public/annual-xlsx.js';
 const data=()=>({settings:{name:'Test Apartmanı'},units:[{id:1,label:'Daire 1',exempt:true},{id:2,label:'Dükkân',exempt:false}],charges:[{id:1,unit_id:1,period:'2026-01',amount:35000,paid:10050,kind:'opening',note:'PRIVATE'},{id:2,unit_id:1,period:'2026-02',amount:35000,paid:35000},{id:3,unit_id:2,period:'2026-01',amount:35000,paid:0},{id:4,unit_id:2,period:'2025-12',amount:5000,paid:1000}]});
 test('Annual dues retain partial payments and exempt units historical debt with exact kuruş totals, excluding other years',()=>{
@@ -37,4 +37,14 @@ test('Excel export has both sheets, numeric money, safe literal text and no priv
  assert.match(grid,/<c r="P6" s="9"><v>599\.5<\/v>/);assert.match(detail,/Devir borcu/);
  assert.doesNotMatch(grid+detail,/<f>|PRIVATE|SECRET_OWNER/);
  assert.match(files['xl/styles.xml'],/numFmtId="164"/);
+});
+
+
+test('Annual filters combine Turkish unit search and debt status and recalculate every displayed total without mutating the report',()=>{
+ const report=annualDues(data(),2026,'2026-10'),before=JSON.stringify(report),r=filterAnnualDues(report,{query:' DUKKAN ',debtOnly:true});
+ assert.equal(r.rows.length,1);assert.equal(r.rows[0].unitId,2);assert.equal(r.amount,35000);assert.equal(r.paid,0);assert.equal(r.remaining,35000);assert.equal(r.months[0].remaining,35000);assert.equal(r.months[1].amount,0);
+ assert.equal(filterAnnualDues(report,{query:'bulunmayan'}).remaining,0);assert.equal(JSON.stringify(report),before);
+ const paid={...report.rows[0],remaining:0};assert.equal(filterAnnualDues({...report,rows:[paid]},{debtOnly:true}).rows.length,0);
+ const files=parts(annualWorkbook(data(),2026,'2026-10',{query:'Dükkân',debtOnly:true})),grid=files['xl/worksheets/sheet1.xml'];
+ assert.match(grid,/Arama: Dükkân/);assert.match(grid,/<autoFilter ref="A3:P4"/);assert.match(grid,/<c r="P5" s="9"><v>350<\/v>/);assert.doesNotMatch(grid,/Daire 1/);
 });
