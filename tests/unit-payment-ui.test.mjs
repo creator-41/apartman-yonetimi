@@ -1,3 +1,4 @@
+import {cashCheckAmounts,cashCheckResult} from '../public/cash-check.js';
 import {budgetSummary,budgetItem} from '../public/budget.js';
 import {expenseUpdate} from '../public/expense-files.js';
 import {annualDues,filterAnnualDues,annualStatus,MONTHS} from '../public/annual-dues.js';
@@ -21,7 +22,7 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,handlers:{},addEventListener(type,fn){this.handlers[type]=fn;},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({budgetSummary,budgetItem,expenseUpdate,FormData:class {constructor(target){this.values=target.formValues;}get(key){return this.values[key]??null;}},Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,filterAnnualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({cashCheckAmounts,cashCheckResult,budgetSummary,budgetItem,expenseUpdate,FormData:class {constructor(target){this.values=target.formValues;}get(key){return this.values[key]??null;}},Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,filterAnnualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> '11111111-1111-4111-8111-111111111111'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
@@ -255,4 +256,24 @@ test('Budget load failures clear cached totals and later responses cannot restor
  let reject;const f=await fixture(()=>new Promise((resolve,fail)=>{reject=fail;}));
  f.run("budgetPlan={version:2,items:[{label:'Test',amount:1}]};");const pending=f.run('loadBudget()');reject(new Error('Network down'));await pending;assert.equal(f.run('budgetPlan'),null);assert.match(f.run('budgetHTML()'),/Plan alınamadı/);
  let resolve;const second=await fixture(()=>new Promise(done=>{resolve=done;}));const pending2=second.run('loadBudget()');second.run("state.admin=false;budgetLoad++;budgetPlan=null;");resolve({version:1,items:[{label:'Private',amount:100}]});await pending2;assert.equal(second.run('budgetPlan'),null);
+});
+
+test('Cash check UI distinguishes historical match from changed current ledger and escapes notes',async()=>{
+ const f=await fixture();f.run("cashCheckData={ledgerCash:1000,history:[]}");assert.match(f.run('cashChecksHTML()'),/Henüz kasa kontrolü yapılmadı/);assert.doesNotMatch(f.run('cashChecksHTML()'),/Hesap tutuyor/);
+ f.run("cashCheckData.history=[{id:'test',checked_at:'2026-10-23T10:00:00Z',bank_balance:500,cash_balance:500,ledger_cash:1000,difference:0,note:'<test>'}]");assert.match(f.run('cashChecksHTML()'),/Hesap tutuyor/);assert.match(f.run('cashChecksHTML()'),/&lt;test&gt;/);
+ f.run('cashCheckData.ledgerCash=900');assert.match(f.run('cashChecksHTML()'),/Son kontrolden sonra/);
+ f.run("cashCheckError='Ağ hatası'");assert.doesNotMatch(f.run('cashChecksHTML()'),/Hesap tutuyor/);assert.match(f.run('cashChecksHTML()'),/alınamadı/);
+ f.run('state.admin=false');assert.equal(f.run('cashChecksHTML()'),'');assert.throws(()=>f.run('newCashCheck()'),/yenileyin/);
+});
+test('Cash check draft previews and retries same identity after uncertain failure, without financial writes',async()=>{
+ const f=await fixture(()=>{throw new Error('Ağ yanıtı kayboldu');});let nextId=0;f.context.crypto.randomUUID=()=>String(++nextId);
+ f.run('cashCheckData={ledgerCash:1235,history:[]};newCashCheck()');f.element('#f-bank').value='10.01';f.element('#f-cash').value='2.34';f.run('cashCheckPreview()');assert.match(f.element('#cashCheckPreview').textContent,/Hesap tutuyor/);
+ const values={bank:'10.01',cash:'2.34',note:''};f.context.form={get:k=>values[k]};
+ await assert.rejects(f.run('dialogAction(form)'),/kayboldu/);await assert.rejects(f.run('dialogAction(form)'),/kayboldu/);
+ assert.equal(f.requests[0][2].requestId,f.requests[1][2].requestId);assert.equal(f.requests[0][2].expectedCash,1235);assert.equal(f.requests[0][2].bank,1001);assert.equal(f.requests[0][2].cash,234);assert(f.requests.every(c=>c[0]==='cash-check'));
+ values.cash='2.35';await assert.rejects(f.run('dialogAction(form)'),/kayboldu/);assert.notEqual(f.requests[2][2].requestId,f.requests[0][2].requestId);assert.equal(f.element('#modal').open,true);
+});
+test('Cash check load failure clears cached historical results and logout blocks late response',async()=>{
+ const f=await fixture(()=>{throw new Error('Offline');});f.run('cashCheckData={ledgerCash:1,history:[]}');await f.run('loadCashChecks()');assert.equal(f.run('cashCheckData'),null);assert.match(f.run('cashChecksHTML()'),/alınamadı/);
+ let resolve;const late=await fixture(()=>new Promise(done=>{resolve=done;}));const pending=late.run('loadCashChecks()');late.run('state.admin=false;cashCheckLoad++;');resolve({ledgerCash:99,history:[]});await pending;assert.equal(late.run('cashCheckData'),null);
 });

@@ -1,3 +1,4 @@
+import {cashCheckAmounts,cashCheckResult} from './cash-check.js?v=cash-check-1';
 import {budgetSummary,budgetItem} from './budget.js?v=budget-1';
 import {annualDues,filterAnnualDues,annualStatus,MONTHS} from './annual-dues.js?v=grid-1';
 import {downloadAnnualWorkbook} from './annual-xlsx.js?v=grid-1';
@@ -19,7 +20,7 @@ import { openTasks, taskSave, statusName } from './work.js?v=request-1';
 import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=request-1';
 import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStatementText } from './reports.js?v=summary-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=budget-1';
+import { createApi } from './transport.js?v=cash-check-1';
 import { config } from './config.js?v=push-1';
 const noticeBook=createNoticeBook(window);
 let ownNotices=[],ownNoticeError="",ownNoticeLoad=0;
@@ -42,6 +43,7 @@ let unitPaymentContext=null,createdPaymentGroup=null;
 let paymentNotices=[],paymentNoticeError="",createdNoticeAcknowledgement=null;
 let residentRequests=[],requestError="",requestFilter="open",requestAccess=null,createdResidentRequest=null;
 let changeHistory=[],historyError="";
+let cashCheckData=null,cashCheckError="",cashCheckLoading=false,cashCheckLoad=0,cashCheckPreview=null;
 let budgetPlan=null,budgetError="",budgetLoading=false,budgetLoad=0;
 'use strict';
 let state,tab='overview',selectedMonth=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit'}).format(new Date()),dialogAction;
@@ -57,14 +59,15 @@ const noticeHTML=n=>'<article class="notice"><h3>'+esc(n.title)+'</h3><p>'+esc(n
 async function refresh(){
  state=await api('state');
  if(initialView){initialView=false;if(!userNavigated&&!state.admin&&unitPreference.get(state.units))tab='my-unit';}
- if(!state.admin){budgetLoad++;budgetPlan=null;budgetError='';budgetLoading=false;changeHistory=[];paymentNotices=[];paymentNoticeError='';residentRequests=[];requestError='';if(['history','payment-notices','requests'].includes(tab))tab='overview';}
+ if(!state.admin){cashCheckLoad++;cashCheckData=null;cashCheckError='';cashCheckLoading=false;cashCheckPreview=null;budgetLoad++;budgetPlan=null;budgetError='';budgetLoading=false;changeHistory=[];paymentNotices=[];paymentNoticeError='';residentRequests=[];requestError='';if(['history','payment-notices','requests'].includes(tab))tab='overview';}
  else if(tab==='history'){try{changeHistory=await api('history');historyError='';}catch(e){changeHistory=[];historyError=e.message;}}
  if(state.admin){try{paymentNotices=await api('payment-notices');paymentNoticeError='';}catch(e){paymentNoticeError=e.message;}}
  if(state.admin){try{residentRequests=await api('requests');requestError='';}catch(e){requestError=e.message;}}
  $('#building').textContent=state.settings.name;document.title=state.settings.name+' · Komşu';
  $('#mode').textContent=state.admin?'Yönetici paneli':'Ortak takip ekranı';$('#auth').textContent=state.admin?'Çıkış yap':'Yönetici girişi';
  document.querySelectorAll('.admin-only').forEach(e=>e.hidden=!state.admin);
- if(!state.admin&&['units','settings','history','payment-notices','requests','budget'].includes(tab))tab='overview';
+ if(!state.admin&&['units','settings','history','payment-notices','requests','budget','cash-check'].includes(tab))tab='overview';
+ if(tab==='cash-check'&&state.admin)await loadCashChecks();
  if(tab==='budget'&&state.admin)await loadBudget();
  if(tab==='my-unit')await loadOwnNotices();
  $('#error').hidden=true;render();
@@ -307,7 +310,7 @@ function myUnitHTML(){
 }
 function moreLinks(){
  const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" '+(['request-new','push-settings'].includes(target)?'data-action="'+target+'"':'data-tab="'+target+'"')+'><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
- return '<section class="more-section"><h2>Bilgiler</h2>'+links([['push-settings','Bildirimler','Bu cihazın bildirimlerini yönet'],['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['budget','Aidat yeterlilik hesabı','Düzenli giderler ve gereken aidat'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
+ return '<section class="more-section"><h2>Bilgiler</h2>'+links([['push-settings','Bildirimler','Bu cihazın bildirimlerini yönet'],['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['cash-check','Kasa kontrolü','Banka, nakit ve kayıtlı kasa karşılaştırması'],['budget','Aidat yeterlilik hesabı','Düzenli giderler ve gereken aidat'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
 }
 function pendingUnits(){return state.units.map(u=>({u,total:state.charges.filter(c=>c.unit_id===u.id).reduce((sum,c)=>sum+c.amount-c.paid,0)})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total||a.u.id-b.u.id);}
 function pendingRows(rows){return rows.map(({u,total})=>'<button class="pending-row" data-action="unit-detail" data-id="'+u.id+'"><strong>'+esc(u.label)+'</strong><span>'+money(total)+' <span aria-hidden="true">›</span></span></button>').join('');}
@@ -317,7 +320,7 @@ function managerOverviewHTML(){
  const priorities='<div class="manager-priorities"><button class="panel priority-card" data-tab="payment-notices"><span>Bekleyen ödemeler</span><strong>'+(paymentNoticeError?'—':notices.length)+'</strong><small>'+(paymentNoticeError?'Alınamadı · Kontrol et':'Ödeme bildirimlerini incele')+'</small></button><button class="panel priority-card" data-tab="requests"><span>Açık arıza ve talepler</span><strong>'+(requestError?'—':requests.length)+'</strong><small>'+(requestError?'Alınamadı · Kontrol et':'Talepleri incele')+'</small></button><button class="panel priority-card total" data-tab="dues"><span>Toplam alacak</span><strong>'+money(state.totals.receivable)+'</strong><small>Önceki aylardan: '+money(old)+'</small></button></div>';
  const debtors='<section class="panel"><div class="toolbar"><h3>Ödeme bekleyen daireler</h3>'+(pending.length>3?'<button class="small outline" data-action="show-pending">Tümü ('+pending.length+')</button>':'')+'</div>'+pendingRows(pending.slice(0,3))+(pending.length?'':'<p class="muted">Bekleyen aidat borcu yok.</p>')+'</section>';
  const taskList=tasks.length?'<section class="panel"><div class="toolbar"><h3>Yapılacak işler</h3><button class="small outline" data-tab="tasks">Tümü ('+tasks.length+')</button></div>'+tasks.slice(0,3).map(taskRow).join('')+'</section>':'';
- return '<h2>Yönetici özeti</h2>'+priorities+'<div class="overview-actions"><button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button><button class="outline" data-tab="report">Aylık bilanço</button></div>'+debtors+taskList+'<section class="panel"><div class="toolbar"><div><h3>Aidat giderleri karşılıyor mu?</h3><p class="muted">Düzenli giderleri ve bölüm başına gereken tutarı hesapla.</p></div><button class="outline" data-tab="budget">Aidat yeterlilik hesabı</button></div></section>'+disclosure('manager-finances','Aylık mali özet','<div class="toolbar">'+monthFilter()+'</div>'+cards())+disclosure('manager-news','Apartmandan haberler',newsHTML(1,true)+'<button class="outline small" data-tab="news">Tüm haberler</button>');
+ return '<h2>Yönetici özeti</h2>'+priorities+'<div class="overview-actions"><button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button><button class="outline" data-tab="report">Aylık bilanço</button><button class="outline" data-tab="cash-check">Kasa kontrolü</button></div>'+debtors+taskList+'<section class="panel"><div class="toolbar"><div><h3>Aidat giderleri karşılıyor mu?</h3><p class="muted">Düzenli giderleri ve bölüm başına gereken tutarı hesapla.</p></div><button class="outline" data-tab="budget">Aidat yeterlilik hesabı</button></div></section>'+disclosure('manager-finances','Aylık mali özet','<div class="toolbar">'+monthFilter()+'</div>'+cards())+disclosure('manager-news','Apartmandan haberler',newsHTML(1,true)+'<button class="outline small" data-tab="news">Tüm haberler</button>');
 }
 function overviewHTML(){
  const charges=state.charges.filter(c=>c.period===selectedMonth),expected=charges.reduce((sum,c)=>sum+c.amount,0),paid=charges.reduce((sum,c)=>sum+c.paid,0),paidCount=charges.filter(c=>c.paid>=c.amount).length;
@@ -364,6 +367,8 @@ function render(){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Apartmandan haberler</h2></div>'+newsHTML()+'</section>';
  }else if(tab==='decisions'||tab==='tasks'){
   view.innerHTML=workHTML();
+ }else if(tab==='cash-check'&&state.admin){
+  view.innerHTML=cashChecksHTML();
  }else if(tab==='budget'&&state.admin){
   view.innerHTML=budgetHTML();
  }else if(tab==='report'){
@@ -388,7 +393,7 @@ function render(){
 }
 const input=(name,label,type='text',value='',extra='')=>'<label for="f-'+name+'">'+label+'</label><input id="f-'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'>';
 function openDialog(title,fields,action,submit='Kaydet'){
- chargeDialogContext=null;reportContext=null;unitPaymentContext=null;expenseDuplicateReset=null;
+ chargeDialogContext=null;reportContext=null;unitPaymentContext=null;expenseDuplicateReset=null;cashCheckPreview=null;
  $('#dialogSubmit').hidden=false;$('#dialogSubmit').disabled=false;
  $('#dialogTitle').textContent=title;$('#dialogFields').innerHTML=fields;$('#dialogError').textContent='';$('#dialogSubmit').textContent=submit;dialogAction=action;$('#modal').showModal();
 }
@@ -399,6 +404,31 @@ function shareButtons(){return '<div class="actions report-actions"><button type
 function downloadText(text,name){
  const url=URL.createObjectURL(new Blob(['\uFEFF'+text],{type:'text/plain;charset=utf-8'}));
  const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function loadCashChecks(){
+ const request=++cashCheckLoad;
+ try{const data=await api('cash-check');if(request===cashCheckLoad&&state.admin){cashCheckData=data;cashCheckError='';}}
+ catch(e){if(request===cashCheckLoad){cashCheckData=null;cashCheckError=e.message;}}
+ finally{if(request===cashCheckLoad)cashCheckLoading=false;}
+}
+const checkDate=value=>new Date(value).toLocaleString('tr-TR',{timeZone:'Europe/Istanbul',dateStyle:'short',timeStyle:'short'});
+function cashChecksHTML(){
+ if(!state.admin)return '';
+ const title='<div class="toolbar"><h2>Kasa kontrolü</h2><div class="actions"><button class="outline small" data-action="cash-check-retry">Yenile</button><button class="outline small" data-tab="overview">Özete dön</button></div></div>';
+ if(cashCheckLoading)return title+'<p class="empty">Kasa kontrolleri yükleniyor…</p>';
+ if(cashCheckError||!cashCheckData)return title+'<section class="panel"><p role="alert">Kasa kontrolleri alınamadı. '+esc(cashCheckError)+'</p><button class="outline" data-action="cash-check-retry">Tekrar dene</button></section>';
+ const last=cashCheckData.history[0],changed=last&&last.ledger_cash!==cashCheckData.ledgerCash;
+ return title+'<section class="panel"><div class="toolbar"><div><p class="muted">Uygulamadaki güncel kasa</p><h3>'+money(cashCheckData.ledgerCash)+'</h3></div><button class="primary" data-action="cash-check-new">Yeni kontrol</button></div><p class="help">Bankadaki bakiye ve eldeki nakdi sayıp girin. Banka hesabına otomatik bağlantı yapılmaz.</p></section>'+(last?'<section class="panel"><h3>Son kontrol · '+esc(checkDate(last.checked_at))+'</h3><p class="budget-result '+(last.difference?'budget-shortfall':'')+'">'+cashCheckResult(last.difference)+(last.difference?' · '+money(Math.abs(last.difference)):'')+'</p><p>Kontrol anındaki kayıtlı kasa: <strong>'+money(last.ledger_cash)+'</strong> · Banka + nakit: <strong>'+money(last.bank_balance+last.cash_balance)+'</strong></p>'+(changed?'<p class="note">Son kontrolden sonra uygulamadaki kasa toplamı değişti. Güncel banka ve nakitle yeni kontrol yapın.</p>':'')+(last.note?'<p>'+esc(last.note)+'</p>':'')+'</section>':'<section class="panel"><p>Henüz kasa kontrolü yapılmadı.</p></section>')+'<section class="panel"><h3>Son 10 kontrol</h3>'+table(['Kontrol tarihi','Banka','Nakit','Kayıtlı kasa','Sonuç / fark','Açıklama'],cashCheckData.history.map(c=>'<tr><td>'+esc(checkDate(c.checked_at))+'</td><td>'+money(c.bank_balance)+'</td><td>'+money(c.cash_balance)+'</td><td>'+money(c.ledger_cash)+'</td><td>'+cashCheckResult(c.difference)+(c.difference?' · '+money(Math.abs(c.difference)):'')+'</td><td class="expense-name">'+esc(c.note)+'</td></tr>'),'Yeni kontrol yaptığınızda burada görünür.')+'<p class="help">Kontroller yapıldıkları anı gösterir. Fark kaydetmek tahsilat, gider veya kasa düzeltmesi oluşturmaz. Yanlış giriş için yeni kontrol yapabilirsiniz.</p></section>';
+}
+function newCashCheck(){
+ if(!state.admin||!cashCheckData||cashCheckError)throw new Error('Önce kasa bilgisini yenileyin.');
+ const expectedCash=cashCheckData.ledgerCash;let requestId=crypto.randomUUID(),previousKey=null;
+ openDialog('Yeni kasa kontrolü','<p>Uygulamadaki kasa: <strong>'+money(expectedCash)+'</strong></p>'+input('bank','Bankadaki bakiye (TL)','number','','required min="-10000000" max="10000000" step="0.01"')+input('cash','Eldeki nakit (TL)','number','','required min="0" max="10000000" step="0.01"')+'<p id="cashCheckPreview" class="help" aria-live="polite">Karşılaştırmak için iki tutarı da girin.</p>'+input('note','Açıklama (isteğe bağlı)','text','','maxlength="300"')+'<p class="help">Yalnızca kontrol sonucu kaydedilir; para kayıtları değişmez.</p>',async f=>{
+  const amounts=cashCheckAmounts(f.get('bank'),f.get('cash'),expectedCash),note=String(f.get('note')||'').trim(),key=JSON.stringify([amounts.bank,amounts.cash,note]);
+  if(previousKey!==null&&previousKey!==key)requestId=crypto.randomUUID();previousKey=key;
+  await api('cash-check','POST',{requestId,bank:amounts.bank,cash:amounts.cash,expectedCash,note});toast('Kasa kontrolü kaydedildi.');
+ },'Kontrolü kaydet');
+ cashCheckPreview=()=>{try{const r=cashCheckAmounts($('#f-bank').value,$('#f-cash').value,expectedCash);$('#cashCheckPreview').textContent='Banka + nakit: '+money(r.total)+' · '+cashCheckResult(r.difference)+(r.difference?' · '+money(Math.abs(r.difference)):'');}catch(e){$('#cashCheckPreview').textContent=e.message;}};
 }
 async function loadBudget(){
  const request=++budgetLoad;
@@ -515,7 +545,7 @@ function manageCharges(mode,ids){
  },mode==='edit'?'Değişiklikleri kaydet':'Seçili aidatları sil');
  chargeDialogContext={mode,rows};updateChargePreview();
 }
-document.addEventListener('input',e=>{if(['f-description','f-amount','f-date'].includes(e.target.id))expenseDuplicateReset?.();if(e.target.id==='annualSearch'){updateAnnualSearch(e);return;}if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
+document.addEventListener('input',e=>{if(['f-bank','f-cash'].includes(e.target.id))cashCheckPreview?.();if(['f-description','f-amount','f-date'].includes(e.target.id))expenseDuplicateReset?.();if(e.target.id==='annualSearch'){updateAnnualSearch(e);return;}if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
 $('#dialogForm').addEventListener('submit',async e=>{
  e.preventDefault();if(!dialogAction)return;const button=$('#dialogSubmit');button.disabled=true;
  try{
@@ -571,13 +601,15 @@ document.addEventListener('submit',async e=>{
  try{const f=new FormData(e.target);await api('settings','PUT',{name:f.get('name'),monthlyDues:Number(f.get('monthlyDues')),openingBalance:Number(f.get('openingBalance'))});await refresh();toast('Ayarlar kaydedildi.');}catch(err){error(err);}finally{button.disabled=false;}
 });
 document.addEventListener('click',async e=>{
- const nav=e.target.closest('[data-tab]');if(nav){userNavigated=true;if(nav.dataset.tab==='annual-dues'&&tab==='dues')annualYear=Number(selectedMonth.slice(0,4));tab=nav.dataset.tab;if(!state){$('#view').innerHTML='<p class="empty">Kayıtlar yükleniyor…</p>';return;}if(tab==='budget'){if(!state.admin){tab='overview';render();return;}budgetPlan=null;budgetLoading=true;render();await loadBudget();render();}else if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
+ const nav=e.target.closest('[data-tab]');if(nav){userNavigated=true;if(nav.dataset.tab==='annual-dues'&&tab==='dues')annualYear=Number(selectedMonth.slice(0,4));tab=nav.dataset.tab;if(!state){$('#view').innerHTML='<p class="empty">Kayıtlar yükleniyor…</p>';return;}if(tab==='cash-check'){if(!state.admin){tab='overview';render();return;}cashCheckData=null;cashCheckLoading=true;render();await loadCashChecks();render();}else if(tab==='budget'){if(!state.admin){tab='overview';render();return;}budgetPlan=null;budgetLoading=true;render();await loadBudget();render();}else if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
  const btn=e.target.closest('[data-action]');if(!btn)return;
  e.preventDefault();
  const action=btn.dataset.action,id=Number(btn.dataset.id);
  if(uploadingDocument)return;
  try{
- if(action==='budget-retry'){budgetLoading=true;render();await loadBudget();render();}
+ if(action==='cash-check-retry'){cashCheckLoading=true;render();await loadCashChecks();render();}
+ else if(action==='cash-check-new'){newCashCheck();}
+ else if(action==='budget-retry'){budgetLoading=true;render();await loadBudget();render();}
  else if(action==='budget-add'||action==='budget-edit'){editBudgetItem(action==='budget-edit'?id:null);}
  else if(action==='budget-delete'){deleteBudgetItem(id);}
  else if(action==='previous-month'||action==='next-month'){
