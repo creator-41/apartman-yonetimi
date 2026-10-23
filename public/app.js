@@ -26,6 +26,7 @@ const storage=sessionStorageFor(window);
 const api=createApi({...config,storage});
 const push=createPush({api,publicKey:config.vapidPublicKey});
 const selectedCharges=new Set();
+const openDisclosures=new Set();
 let chargeDialogContext=null;
 let bulkMode=false;
 let unitQuery="",duesFilter="all";
@@ -199,7 +200,7 @@ function createRequestTask(id){
  },'Görevi oluştur');
 }
 
-function noticeEntryButton(unitId){return '<button type="button" class="outline" data-action="payment-notice"'+(unitId?' data-id="'+unitId+'"':'')+'>Ödeme yaptım</button>';}
+function noticeEntryButton(unitId,primary=false){return '<button type="button" class="'+(primary?'primary':'outline')+'" data-action="payment-notice"'+(unitId?' data-id="'+unitId+'"':'')+'>Ödeme yaptım</button>';}
 function noticeQueueCard(){
  if(!state.admin)return '';
  const count=waitingNotices(paymentNotices).length;
@@ -276,9 +277,18 @@ async function loadOwnNotices(){
  try{const rows=await api('payment-notices/track','POST',entries.map(({id,token})=>({id,token})));if(load===ownNoticeLoad)ownNotices=rows.filter(n=>n.unit_id===id);}
  catch{if(load===ownNoticeLoad)ownNoticeError='Bildirim durumları alınamadı. Bağlantınızı kontrol edip yenileyin.';}
 }
+function disclosure(key,title,content){
+ return '<details class="panel dashboard-details" data-disclosure="'+esc(key)+'"'+(openDisclosures.has(key)?' open':'')+'><summary>'+esc(title)+'</summary>'+content+'</details>';
+}
+document.addEventListener('toggle',event=>{
+ const key=event.target.dataset?.disclosure;if(!key)return;
+ if(event.target.open)openDisclosures.add(key);else openDisclosures.delete(key);
+},true);
 function ownNoticesHTML(id){
- const rows=ownNotices.filter(n=>n.unit_id===id);
- return '<section class="panel"><div class="toolbar"><h3>Ödeme bildirimlerim</h3><button class="outline small" data-action="refresh-own-notices">Durumları yenile</button></div><p class="help">Bu cihazdan gönderdiğiniz bildirimleri burada takip edebilirsiniz.</p>'+(ownNoticeError?'<p role="alert">'+esc(ownNoticeError)+'</p>':rows.map(n=>'<article class="notice"><div class="toolbar"><strong>'+money(n.amount)+' · '+dateName(n.date)+'</strong><span class="badge">'+esc(ownNoticeStatus(n.status))+'</span></div><small>Bildirim '+esc(n.id.slice(0,8))+'</small>'+(n.review_note?'<p>Yönetici açıklaması: '+esc(n.review_note)+'</p>':'')+(n.status==='approved'?(n.payments.some(p=>!p.active)?'<p class="help">Bu tahsilatın bir kısmı veya tamamı sonradan geri alınmış. Güncel borcunuzu kontrol edin.</p>':'')+'<div class="actions">'+n.payments.filter(p=>p.active).map(p=>'<button class="outline small" data-action="receipt" data-id="'+p.id+'">'+esc(monthName(p.period))+' · Makbuz</button>').join('')+'</div>':'')+'</article>').join('')||'<p class="empty">Bu daireye ait takip edilebilir bildirim yok.</p>')+'</section>';
+ const rows=ownNotices.filter(n=>n.unit_id===id),waiting=waitingNotices(rows),done=rows.filter(n=>!['pending','uploading'].includes(n.status));
+ const row=n=>'<article class="notice"><div class="toolbar"><strong>'+money(n.amount)+' · '+dateName(n.date)+'</strong><span class="badge">'+esc(ownNoticeStatus(n.status))+'</span></div><small>Bildirim '+esc(n.id.slice(0,8))+'</small>'+(n.review_note?'<p>Yönetici açıklaması: '+esc(n.review_note)+'</p>':'')+(n.status==='approved'?(n.payments.some(p=>!p.active)?'<p class="help">Bu tahsilatın bir kısmı veya tamamı sonradan geri alınmış. Güncel borcunuzu kontrol edin.</p>':'')+'<div class="actions">'+n.payments.filter(p=>p.active).map(p=>'<button class="outline small" data-action="receipt" data-id="'+p.id+'">'+esc(monthName(p.period))+' · Makbuz</button>').join('')+'</div>':'')+'</article>';
+ const completed=done.length?disclosure('unit-'+id+'-notices','Sonuçlanan bildirimler · '+done.filter(n=>n.status==='approved').length+' onaylandı · '+done.filter(n=>n.status==='rejected').length+' reddedildi',done.map(row).join('')):'';
+ return '<section class="panel own-notices"><div class="toolbar"><h3>Ödeme bildirimlerim'+(waiting.length?' · '+waiting.length+' bekleyen':'')+'</h3><button class="outline small" data-action="refresh-own-notices">Yenile</button></div>'+(ownNoticeError?'<p role="alert">'+esc(ownNoticeError)+'</p>':waiting.map(row).join('')+completed||'<p class="help">Bu cihazdan göndereceğiniz bildirimleri burada takip edebilirsiniz.</p>')+'</section>';
 }
 function myUnitHTML(){
  const id=unitPreference.get(state.units),unit=state.units.find(u=>u.id===id);
@@ -286,7 +296,7 @@ function myUnitHTML(){
  const month=today().slice(0,7),charges=state.charges.filter(c=>c.unit_id===id),unpaid=charges.filter(c=>c.amount>c.paid).sort((a,b)=>b.period.localeCompare(a.period)||b.id-a.id);
  const remaining=rows=>rows.reduce((sum,c)=>sum+c.amount-c.paid,0),total=remaining(charges),old=remaining(charges.filter(c=>c.period<month)),current=remaining(charges.filter(c=>c.period===month)),future=remaining(charges.filter(c=>c.period>month));
  const payments=unitStatement(state,id).rows.filter(r=>r.type==='payment').reverse();
- return '<div class="toolbar"><div><h2>Dairem · '+esc(unit.label)+'</h2>'+(unit.exempt?'<span class="badge">Yönetim kararı ile muaf</span>':'')+'</div><button class="outline small" data-action="choose-unit">Daireyi değiştir</button></div><div class="cards my-unit-cards">'+[['Toplam kalan borç',total],['Bu ay kalan',current],['Önceki aylardan kalan',old],...(future?[['Gelecek aylara ait',future]]:[])].map(([title,value])=>'<div class="card"><div class="label">'+title+'</div><div class="number">'+money(value)+'</div></div>').join('')+'</div><div class="overview-actions">'+noticeEntryButton(id)+'<button class="outline" data-action="unit-detail" data-id="'+id+'">Hesap dökümü</button></div>'+bankHTML()+ownNoticesHTML(id)+'<section class="panel"><h3>Bekleyen borçlar</h3>'+table(['Dönem','Kalan'],unpaid.map(c=>'<tr><td>'+esc(monthName(c.period))+(c.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'</td><td>'+money(c.amount-c.paid)+'</td></tr>'),'Bekleyen borcunuz yok.')+'</section><section class="panel"><h3>Ödeme geçmişi</h3>'+table(['Tarih','Aidat ayı','Tutar',''],payments.map(p=>'<tr><td>'+dateName(p.date)+'</td><td>'+esc(monthName(p.period))+'</td><td>'+money(p.credit)+'</td><td><button class="outline small" data-action="receipt" data-id="'+p.id+'">Makbuz</button></td></tr>'),'Henüz kayıtlı ödemeniz yok.')+'</section>';
+ return '<div class="toolbar"><div><h2>Dairem · '+esc(unit.label)+'</h2>'+(unit.exempt?'<span class="badge">Yönetim kararı ile muaf</span>':'')+'</div><button class="outline small" data-action="choose-unit">Daireyi değiştir</button></div><section class="panel unit-balance"><div class="label">Toplam kalan borç</div><div class="number">'+money(total)+'</div><div class="unit-balance-parts">'+[['Bu ay kalan',current],['Önceki aylardan kalan',old],...(future?[['Gelecek aylara ait',future]]:[])].map(([title,value])=>'<span>'+title+' <strong>'+money(value)+'</strong></span>').join('')+'</div></section><div class="overview-actions">'+noticeEntryButton(id,true)+'<button class="outline" data-action="unit-detail" data-id="'+id+'">Hesap dökümü</button></div>'+bankHTML()+ownNoticesHTML(id)+disclosure('unit-'+id+'-debt','Borç ayrıntıları · '+unpaid.length+' dönem',table(['Dönem','Kalan'],unpaid.map(c=>'<tr><td>'+esc(monthName(c.period))+(c.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'</td><td>'+money(c.amount-c.paid)+'</td></tr>'),'Bekleyen borcunuz yok.'))+disclosure('unit-'+id+'-payments','Ödeme geçmişi · '+payments.length+' kayıt',table(['Tarih','Aidat ayı','Tutar',''],payments.map(p=>'<tr><td>'+dateName(p.date)+'</td><td>'+esc(monthName(p.period))+'</td><td>'+money(p.credit)+'</td><td><button class="outline small" data-action="receipt" data-id="'+p.id+'">Makbuz</button></td></tr>'),'Henüz kayıtlı ödemeniz yok.'));
 }
 function moreLinks(){
  const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" '+(['request-new','push-settings'].includes(target)?'data-action="'+target+'"':'data-tab="'+target+'"')+'><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
@@ -294,9 +304,18 @@ function moreLinks(){
 }
 function pendingUnits(){return state.units.map(u=>({u,total:state.charges.filter(c=>c.unit_id===u.id).reduce((sum,c)=>sum+c.amount-c.paid,0)})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total||a.u.id-b.u.id);}
 function pendingRows(rows){return rows.map(({u,total})=>'<button class="pending-row" data-action="unit-detail" data-id="'+u.id+'"><strong>'+esc(u.label)+'</strong><span>'+money(total)+' <span aria-hidden="true">›</span></span></button>').join('');}
+function managerOverviewHTML(){
+ const notices=waitingNotices(paymentNotices),requests=residentRequests.filter(r=>r.status!=='done'),pending=pendingUnits(),tasks=openTasks(state.tasks||[],today());
+ const old=state.charges.filter(c=>c.period<today().slice(0,7)).reduce((sum,c)=>sum+c.amount-c.paid,0);
+ const priorities='<div class="manager-priorities"><button class="panel priority-card" data-tab="payment-notices"><span>Bekleyen ödemeler</span><strong>'+(paymentNoticeError?'—':notices.length)+'</strong><small>'+(paymentNoticeError?'Alınamadı · Kontrol et':'Ödeme bildirimlerini incele')+'</small></button><button class="panel priority-card" data-tab="requests"><span>Açık arıza ve talepler</span><strong>'+(requestError?'—':requests.length)+'</strong><small>'+(requestError?'Alınamadı · Kontrol et':'Talepleri incele')+'</small></button><button class="panel priority-card total" data-tab="dues"><span>Toplam alacak</span><strong>'+money(state.totals.receivable)+'</strong><small>Önceki aylardan: '+money(old)+'</small></button></div>';
+ const debtors='<section class="panel"><div class="toolbar"><h3>Ödeme bekleyen daireler</h3>'+(pending.length>3?'<button class="small outline" data-action="show-pending">Tümü ('+pending.length+')</button>':'')+'</div>'+pendingRows(pending.slice(0,3))+(pending.length?'':'<p class="muted">Bekleyen aidat borcu yok.</p>')+'</section>';
+ const taskList=tasks.length?'<section class="panel"><div class="toolbar"><h3>Yapılacak işler</h3><button class="small outline" data-tab="tasks">Tümü ('+tasks.length+')</button></div>'+tasks.slice(0,3).map(taskRow).join('')+'</section>':'';
+ return '<h2>Yönetici özeti</h2>'+priorities+'<div class="overview-actions"><button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button><button class="outline" data-tab="report">Aylık bilanço</button></div>'+debtors+taskList+disclosure('manager-finances','Aylık mali özet','<div class="toolbar">'+monthFilter()+'</div>'+cards())+disclosure('manager-news','Apartmandan haberler',newsHTML(1,true)+'<button class="outline small" data-tab="news">Tüm haberler</button>');
+}
 function overviewHTML(){
  const charges=state.charges.filter(c=>c.period===selectedMonth),expected=charges.reduce((sum,c)=>sum+c.amount,0),paid=charges.reduce((sum,c)=>sum+c.paid,0),paidCount=charges.filter(c=>c.paid>=c.amount).length;
  const pending=pendingUnits(),tasks=openTasks(state.tasks||[],today());
+ if(state.admin)return managerOverviewHTML();
  return '<div class="toolbar overview-toolbar"><h2>Apartman özeti</h2>'+monthFilter()+'</div>'+cards()+'<div class="overview-actions">'+(state.admin?'<button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button>':'')+'<button class="outline" data-tab="report">Aylık bilanço</button>'+(!state.admin?noticeEntryButton()+requestEntry():'')+'</div>'+noticeQueueCard()+requestQueueCard()+'<section class="panel dues-summary"><div class="toolbar"><h3>Bu ayın aidatları</h3><span class="muted">'+paidCount+' / '+charges.length+' bölüm ödedi</span></div><progress max="'+(expected||1)+'" value="'+paid+'" aria-label="Aidat tahsilat oranı"></progress><div class="dues-summary-values"><span>Beklenen <strong>'+money(expected)+'</strong></span><span>Kalan <strong>'+money(expected-paid)+'</strong></span></div>'+(!charges.length?'<p class="help">Bu ay aidat oluşturulmamış.</p>':'')+'</section><div class="overview-columns"><section class="panel"><div class="toolbar"><h2>Ödeme bekleyenler</h2>'+(pending.length>3?'<button class="small outline" data-action="show-pending">Tümü ('+pending.length+')</button>':'')+'</div>'+pendingRows(pending.slice(0,3))+(pending.length?'':'<p class="muted">Bekleyen aidat borcu yok.</p>')+'</section><section class="panel compact-news"><div class="toolbar"><h2>Apartmandan haberler</h2><button class="small outline" data-tab="news">Tümü</button></div>'+newsHTML(1,true)+'</section></div>'+(tasks.length?'<section class="panel summary-tasks"><div class="toolbar"><h2>Yapılacak işler</h2><button class="small outline" data-tab="tasks">Tümü ('+tasks.length+')</button></div>'+tasks.slice(0,3).map(taskRow).join('')+'</section>':'');
 }
 function render(){
