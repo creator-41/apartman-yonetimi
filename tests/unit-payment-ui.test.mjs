@@ -1,3 +1,4 @@
+import {DOCUMENT_CATEGORIES,archiveFields,filterDocuments,uploadArchiveDocument} from '../public/document-archive.js';
 import {cashCheckAmounts,cashCheckResult} from '../public/cash-check.js';
 import {budgetSummary,budgetItem} from '../public/budget.js';
 import {expenseUpdate} from '../public/expense-files.js';
@@ -22,7 +23,7 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,handlers:{},addEventListener(type,fn){this.handlers[type]=fn;},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({cashCheckAmounts,cashCheckResult,budgetSummary,budgetItem,expenseUpdate,FormData:class {constructor(target){this.values=target.formValues;}get(key){return this.values[key]??null;}},Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,filterAnnualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({DOCUMENT_CATEGORIES,archiveFields,filterDocuments,uploadArchiveDocument,cashCheckAmounts,cashCheckResult,budgetSummary,budgetItem,expenseUpdate,FormData:class {constructor(target){this.values=target.formValues;}get(key){return this.values[key]??null;}},Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,filterAnnualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> '11111111-1111-4111-8111-111111111111'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
@@ -276,4 +277,18 @@ test('Cash check draft previews and retries same identity after uncertain failur
 test('Cash check load failure clears cached historical results and logout blocks late response',async()=>{
  const f=await fixture(()=>{throw new Error('Offline');});f.run('cashCheckData={ledgerCash:1,history:[]}');await f.run('loadCashChecks()');assert.equal(f.run('cashCheckData'),null);assert.match(f.run('cashChecksHTML()'),/alınamadı/);
  let resolve;const late=await fixture(()=>new Promise(done=>{resolve=done;}));const pending=late.run('loadCashChecks()');late.run('state.admin=false;cashCheckLoad++;');resolve({ledgerCash:99,history:[]});await pending;assert.equal(late.run('cashCheckData'),null);
+});
+
+test('Archive UI exposes shared active completed files to residents and escapes names',async()=>{
+ const f=await fixture();f.run("archiveRows=[{id:'1',title:'<Plan>',file_name:'x.pdf',category:'Yönetim planı',bytes:100,created_at:'2026-10-23',uploaded:true,shared:true,archived:false},{id:'2',title:'Private',file_name:'p.pdf',category:'Diğer',bytes:100,created_at:'2026-10-23',uploaded:true,shared:false,archived:false},{id:'3',title:'Removed',file_name:'r.pdf',category:'Diğer',bytes:100,created_at:'2026-10-23',uploaded:true,shared:true,archived:true},{id:'4',title:'Pending',file_name:'u.pdf',category:'Diğer',bytes:100,created_at:'2026-10-23',uploaded:false,shared:true,archived:false}];");
+ assert.match(f.run('archiveHTML()'),/Private/);f.run('state.admin=false');const html=f.run('archiveHTML()');assert.match(html,/&lt;Plan&gt;/);for(const text of ['Private','Removed','Pending','Belge ekle','Kaldırılanlar'])assert(!html.includes(text));
+ f.run("archiveError='Offline'");assert.match(f.run('archiveHTML()'),/alınamadı/);assert.doesNotMatch(f.run('archiveHTML()'),/Plan&gt;/);assert.throws(()=>f.run('editArchiveDocument()'),/Yönetici/);
+});
+test('Archive edits capture version and privacy choice and preserve form on stale rejection',async()=>{
+ const f=await fixture(()=>{throw new Error('Listeyi yenileyin');});f.run("editArchiveDocument({id:'test',title:'Plan',category:'Yönetim planı',shared:false,version:2})");
+ assert.match(f.element('#dialogFields').innerHTML,/Yalnızca yönetici/);f.context.form={get:k=>({title:'Yeni plan',category:'Yönetim planı',shared:'shared'}[k])};await assert.rejects(f.run('dialogAction(form)'),/yenileyin/);assert.equal(f.requests[0][2].expectedVersion,2);assert.equal(f.requests[0][2].shared,true);assert.equal(f.requests[0][0],'documents/manage');assert.equal(f.element('#modal').open,true);
+});
+test('Archive ignores late privileged response after logout and clears list after read failure',async()=>{
+ let resolve;const f=await fixture(()=>new Promise(done=>{resolve=done;}));const pending=f.run('loadArchive()');f.run('state.admin=false;archiveLoad++;archiveRows=[]');resolve([{title:'Private'}]);await pending;assert.equal(f.run('archiveRows.length'),0);
+ const failed=await fixture(()=>{throw new Error('Offline');});failed.run("archiveRows=[{title:'Cached'}]");await failed.run('loadArchive()');assert.equal(failed.run('archiveRows.length'),0);assert.match(failed.run('archiveError'),/Offline/);
 });

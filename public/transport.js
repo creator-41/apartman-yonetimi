@@ -87,6 +87,19 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       }
       throw new Error('Geçersiz fotoğraf işlemi.');
     }
+    if(path==='documents'&&method==='GET')return rpc('apartman_document_list',{});
+    if(path==='documents/manage'&&method==='POST')return rpc('apartman_document_manage',{payload:data});
+    if(path.startsWith('archive-files/')){
+      const objectPath=data?.path,bucket='apartman-documents';
+      if(typeof objectPath!=='string'||!(/^[0-9a-f-]{36}\.(jpg|png|webp|pdf)$/).test(objectPath))throw new Error('Geçersiz belge yolu.');
+      if(path==='archive-files/upload'&&method==='POST')return storageRequest('object/'+bucket+'/'+objectPath,'POST',data.file,data.file.type);
+      if(path==='archive-files/sign'&&method==='POST'){
+        const result=await storageRequest('object/sign/'+bucket+'/'+objectPath,'POST',{expiresIn:60});
+        if(typeof result.signedURL!=='string'||!result.signedURL.startsWith('/object/sign/'+bucket+'/'))throw new Error('Belge bağlantısı oluşturulamadı.');
+        return {url:url+'/storage/v1'+result.signedURL};
+      }
+      throw new Error('Geçersiz belge işlemi.');
+    }
     if(path==='cash-check'&&method==='GET')return rpc('apartman_cash_check_get',{});
     if(path==='cash-check'&&method==='POST')return rpc('apartman_cash_check_save',{payload:data});
     if(path==='budget'&&method==='GET')return rpc('apartman_budget_get',{});
