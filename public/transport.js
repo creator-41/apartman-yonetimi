@@ -87,6 +87,8 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       }
       throw new Error('Geçersiz fotoğraf işlemi.');
     }
+    if(path==='cash-check'&&method==='GET')return rpc('apartman_cash_check_get',{});
+    if(path==='cash-check'&&method==='POST')return rpc('apartman_cash_check_save',{payload:data});
     if(path==='budget'&&method==='GET')return rpc('apartman_budget_get',{});
     if(path==='budget'&&method==='PUT')return rpc('apartman_budget_save',{payload:data});
     if(path==='push/device')return rpc('apartman_push_device',{payload:data});
