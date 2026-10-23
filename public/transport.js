@@ -119,6 +119,7 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       }
       throw new Error('Geçersiz belge işlemi.');
     }
+    if(path==='expenses/save'&&method==='POST')return rpc('apartman_expense_save',{payload:data});
     if(path==='expenses/manage'&&method==='POST')return rpc('apartman_expense_manage',{payload:data});
     if(path==='bank'&&method==='PUT')return rpc('apartman_bank_save',{payload:data});
     if(path==='history')return rpc('apartman_change_history',{});

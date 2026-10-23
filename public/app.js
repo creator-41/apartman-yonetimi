@@ -18,7 +18,7 @@ import { openTasks, taskSave, statusName } from './work.js?v=request-1';
 import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=request-1';
 import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStatementText } from './reports.js?v=summary-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=track-1';
+import { createApi } from './transport.js?v=expense-guard-1';
 import { config } from './config.js?v=push-1';
 const noticeBook=createNoticeBook(window);
 let ownNotices=[],ownNoticeError="",ownNoticeLoad=0;
@@ -33,7 +33,7 @@ let chargeDialogContext=null;
 let bulkMode=false;
 let unitQuery="",duesFilter="all";
 let reportContext=null;
-let documentTarget=null;
+let documentTarget=null,expenseDuplicateReset=null;
 let workFilter="open";let decisionArchive=false;
 let uploadingDocument=false;
 let createdPaymentId=null,createdDecisionReadId=null;
@@ -383,7 +383,7 @@ function render(){
 }
 const input=(name,label,type='text',value='',extra='')=>'<label for="f-'+name+'">'+label+'</label><input id="f-'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'>';
 function openDialog(title,fields,action,submit='Kaydet'){
- chargeDialogContext=null;reportContext=null;unitPaymentContext=null;
+ chargeDialogContext=null;reportContext=null;unitPaymentContext=null;expenseDuplicateReset=null;
  $('#dialogSubmit').hidden=false;$('#dialogSubmit').disabled=false;
  $('#dialogTitle').textContent=title;$('#dialogFields').innerHTML=fields;$('#dialogError').textContent='';$('#dialogSubmit').textContent=submit;dialogAction=action;$('#modal').showModal();
 }
@@ -402,13 +402,19 @@ function reportHTML(){
  return '<section class="panel monthly-balance"><div class="toolbar"><div><p class="eyebrow">'+esc(state.settings.name)+'</p><h2>Aylık bilanço</h2></div>'+monthFilter()+'</div><div class="actions report-actions"><button class="primary" data-action="copy-month-summary">Özeti kopyala</button><button class="outline" data-action="print-balance">Yazdır / PDF kaydet</button><button class="outline" data-action="copy-report">Metni kopyala</button><button class="outline" data-action="download-report">Metin indir</button></div><div class="balance-cards">'+summary.map(([label,value])=>'<div><span>'+label+'</span><strong>'+money(value)+'</strong></div>').join('')+'</div><h3 class="section-title">Tahsilatlar</h3>'+table(['Ödeme tarihi','Bölüm','Aidat dönemi','Tutar'],r.collections.map(p=>'<tr><td>'+dateName(p.date)+'</td><td>'+esc(p.unit)+'</td><td>'+(p.period?esc(monthName(p.period)):'—')+'</td><td>'+money(p.amount)+'</td></tr>'),'Bu ay tahsilat yok.')+'<h3 class="section-title">Harcama özeti</h3>'+(r.categories.map(c=>'<div class="bar-row"><span>'+esc(c.category)+'</span><strong>'+money(c.amount)+'</strong></div>').join('')||'<p class="muted">Bu ay harcama yok.</p>')+'<h3 class="section-title">Harcamalar</h3>'+table(['Tarih','Kategori','Açıklama','Tutar'],r.spending.map(e=>'<tr><td>'+dateName(e.date)+'</td><td>'+esc(e.category)+'</td><td class="expense-name">'+esc(e.description)+'</td><td>'+money(e.amount)+'</td></tr>'),'Bu ay harcama yok.')+'<h3 class="section-title">Aidat borcu kalan daireler</h3>'+table(['Bölüm','Durum','Bu ay kalan','Önceki borç','Toplam'],r.debtors.map(u=>'<tr><td>'+esc(u.label)+'</td><td>'+esc(u.status)+'</td><td>'+money(u.currentRemaining)+'</td><td>'+money(u.olderRemaining)+'</td><td><strong>'+money(u.total)+'</strong></td></tr>'),'Ay sonu itibarıyla bekleyen aidat borcu yok.')+'<p class="help">Tahsilatlar ödeme tarihine göredir. Borçlar seçilen ay sonuna kadar olan kayıtlarla hesaplanır; sonraki aylardaki ödemeler bu rapora dahil değildir.</p></section>';
 }
 function editExpense(expense){
- const editing=Boolean(expense),snapshot=expense?{...expense}:null;
+ if(!state.admin)throw new Error('Yönetici girişi gerekli.');
+ const editing=Boolean(expense),snapshot=expense?{...expense}:null;let duplicateContext=null;
  const fields='<label for="f-category">Kategori</label><select id="f-category" name="category">'+state.categories.map(c=>'<option '+(c===expense?.category?'selected':'')+'>'+esc(c)+'</option>').join('')+'</select>'+input('description','Açıklama','text',expense?.description||'','required maxlength="300"')+input('amount','Tutar (TL)','number',expense?expense.amount/100:'','required min="0.01" step="0.01" max="10000000"')+input('date','Gider tarihi','date',expense?.date||today(),'required min="2000-01-01" max="2099-12-31"');
- openDialog(editing?'Gideri düzenle':'Ortak gider ekle',fields,async f=>{
+ openDialog(editing?'Gideri düzenle':'Ortak gider ekle',fields+'<div id="expenseDuplicateWarning" role="alert" hidden></div>',async f=>{
   const values={category:f.get('category'),description:f.get('description'),amount:Number(f.get('amount')),date:f.get('date')};
-  if(editing)await api('expenses/manage','POST',expenseUpdate(snapshot,values));else await api('expenses','POST',values);
+  const key=JSON.stringify(values),confirmed=duplicateContext?.key===key&&f.get('separateExpense')==='on';
+  if(duplicateContext?.key===key&&!confirmed)throw new Error('Ayrı bir harcamaysa aşağıdaki kutuyu işaretleyin; değilse formu kapatın.');
+  const payload=editing?expenseUpdate(snapshot,values):{operation:'create',...values};
+  const result=await api('expenses/save','POST',{...payload,...(confirmed?{separateExpense:true,confirmedMatches:duplicateContext.matches}:{})});
+  if(result.duplicate){duplicateContext={key,matches:result.matches};const warning=$('#expenseDuplicateWarning');warning.innerHTML='<h3>Bu gider daha önce kaydedilmiş olabilir</h3>'+table(['Kayıt','Tarih','Kategori','Açıklama','Tutar'],result.matches.map(e=>'<tr><td>#'+e.id+'</td><td>'+dateName(e.date)+'</td><td>'+esc(e.category)+'</td><td class="expense-name">'+esc(e.description)+'</td><td>'+money(e.amount)+'</td></tr>'))+'<label class="check"><input type="checkbox" name="separateExpense"> Bu, listelenen kayıtlardan ayrı bir harcamadır.</label>';warning.hidden=false;$('#dialogSubmit').textContent='Yine de kaydet';$('#dialogError').textContent='';return false;}
   selectedMonth=values.date.slice(0,7);toast(editing?'Gider güncellendi.':'Gider kaydedildi. Fiş veya faturayı Belgeler bölümünden ekleyebilirsiniz.');
  });
+ expenseDuplicateReset=()=>{duplicateContext=null;$('#expenseDuplicateWarning').hidden=true;$('#expenseDuplicateWarning').innerHTML='';$('#dialogSubmit').textContent='Kaydet';$('#dialogError').textContent='';};
 }
 function showExpenseFiles(expenseId){showDocumentFiles('expense',expenseId);}
 function showDocumentFiles(kind,id){
@@ -474,11 +480,11 @@ function manageCharges(mode,ids){
  },mode==='edit'?'Değişiklikleri kaydet':'Seçili aidatları sil');
  chargeDialogContext={mode,rows};updateChargePreview();
 }
-document.addEventListener('input',e=>{if(e.target.id==='annualSearch'){updateAnnualSearch(e);return;}if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
+document.addEventListener('input',e=>{if(['f-description','f-amount','f-date'].includes(e.target.id))expenseDuplicateReset?.();if(e.target.id==='annualSearch'){updateAnnualSearch(e);return;}if(e.target.id==='unitSearch'){updateUnitSearch(e);return;}if(['f-amount','f-period'].includes(e.target.id)){updateChargePreview();updateUnitPaymentPreview();}});
 $('#dialogForm').addEventListener('submit',async e=>{
  e.preventDefault();if(!dialogAction)return;const button=$('#dialogSubmit');button.disabled=true;
  try{
-  await dialogAction(new FormData(e.target));$('#modal').close();
+  if(await dialogAction(new FormData(e.target))===false)return;$('#modal').close();
   const paymentId=createdPaymentId,group=createdPaymentGroup,notice=createdNoticeAcknowledgement,residentRequest=createdResidentRequest,readId=createdDecisionReadId;createdDecisionReadId=null;createdPaymentId=null;createdPaymentGroup=null;createdNoticeAcknowledgement=null;createdResidentRequest=null;
   try{await refresh();if(residentRequest)await showOwnRequest({id:residentRequest.id,token:residentRequest.token});else if(notice)showNoticeAcknowledgement(notice);else if(group)showPaymentGroup(group);else if(paymentId)showReceipt(paymentId);else if(readId)await showDecisionDetail(readId);else await followNotification();}
   catch(err){error(new Error('İşlem tamamlandı, ekran yenilenemedi. Tekrar kaydetmeden önce sayfayı yenileyin. '+err.message));}
@@ -505,7 +511,7 @@ $('#auth').addEventListener('click',async()=>{
  if(state?.admin){try{await api('logout','POST',{});await refresh();toast('Yönetici oturumu kapatıldı.');}catch(e){error(e);}return;}
  openAdminLogin();
 });
-document.addEventListener('change',e=>{
+document.addEventListener('change',e=>{if(['f-category','f-description','f-amount','f-date'].includes(e.target.id))expenseDuplicateReset?.();
  if(e.target.id==='annualDebtOnly'){annualDebtOnly=e.target.checked;render();$('#annualDebtOnly').focus();}
  else if(e.target.id==='annualYear'){const year=Number(e.target.value);if(!Number.isInteger(year)||year<2000||year>2099){e.target.value=annualYear;error(new Error('2000–2099 arasında bir yıl seçin.'));return;}annualYear=year;render();}
  else if(e.target.id==='duesFilter'){duesFilter=e.target.value;selectedCharges.clear();render();$('#duesFilter').focus();}

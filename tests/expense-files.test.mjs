@@ -40,3 +40,9 @@ test('Storage transport sends raw bytes, applies session refresh and validates s
  const signed=await api('files/sign','POST',{path:receipt.path});assert(signed.url.startsWith('https://test.supabase.co/storage/v1/object/sign/'));
  await assert.rejects(api('files/sign','POST',{path:'../../private'}),/Geçersiz/);
 });
+
+test('Expense save uses guarded RPC and preserves confirmation payload',async()=>{
+ let called;const api=createApi({url:'https://test.supabase.co',key:'public',storage:{getItem:()=>JSON.stringify({access_token:'test',expires_at:9999999999}),setItem(){}},fetchImpl:async(url,options)=>{called={url,options};return {ok:true,json:async()=>({duplicate:true,matches:[]})};}});
+ const payload={operation:'create',amount:50,separateExpense:true,confirmedMatches:[]};await api('expenses/save','POST',payload);
+ assert(called.url.endsWith('/rpc/apartman_expense_save'));assert.deepEqual(JSON.parse(called.options.body),{payload});
+});

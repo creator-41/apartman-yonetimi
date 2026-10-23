@@ -265,3 +265,11 @@ Doğrulama: sözdizimi kontrolleri ve 107 Node testi başarılı. Yeni kontrolle
 Aynı yıldaki veri yenilemesinde geniş tablonun yatay ve dikey kaydırması korunur; yıl değişince tablo baştan açılır. Başlangıç verileri yüklenirken kullanıcının seçtiği sekme, hatırlanan Dairem tercihiyle artık ezilmez ve yükleme sırasında boş state ile render çağrılmaz. Kullanıcı sekme seçmemişse önceki Dairem başlangıç davranışı korunur.
 
 Doğrulama: sözdizimi ve diff kontrolleri ile 110 Node testi geçti. Türkçe arama/borç filtresi, tüm toplamların ve Excel satırlarının aynı kapsamı taşıması, gecikmiş başlangıç yanıtında seçilen sekmenin korunması ve tablo yeniden oluşturulduğunda iki kaydırma ekseninin taşınması kontrol edildi. Veritabanı değişikliği yok.
+
+## Aynı gideri tekrar kaydetmeden önce uyarı
+
+Gider ekleme ve düzenleme, aynı tarih, kuruş tutarı ve açıklamaya sahip kayıtları kaydetmeden önce gösterir. Açıklamada Türkçe büyük/küçük harf ve fazla boşluklar eşleştirilir; kategori farklılığı eşleşmeyi kaldırmaz. Düzenlenen kayıt kendisiyle karşılaştırılmaz. Uyarı geldiğinde form açık kalır ve kasa değişmez. Yönetici, ayrı bir harcama olduğunu işaretleyip **Yine de kaydet** ile devam edebilir. Alan değişince önceki onay temizlenir; arada eşleşen kayıtlar değişmişse sunucu güncel listeyi yeniden gösterir.
+
+`apartman_expense_save` yönetici yetkisini denetleyen yeni RPC'dir; mevcut finans kilidi altında kontrol ederek eski gider oluşturma/düzenleme işlevlerine devreder. Kasa, işlem geçmişi, geri alma ve düzenleme anlık görüntüsü kontrolleri korunur. Eski RPC'ler uyumluluk için değişmeden kalır; bu özellik mutlak tekillik kısıtı değildir.
+
+CLI ile oluşturulan `20261023105652_duplicate_expense_warning.sql` migration'ı sunucuda `20261023105840` sürümüyle uygulanmıştır; yeniden uygulanmaz. Sözdizimi, diff kontrolleri ve 113 Node testi geçti. `verify-duplicate-expense-warning.sql`, oluşturma/düzenleme, Türkçe ve boşluk eşleşmesi, ayrı harcama onayı, eski onayın geçersizleşmesi, eski düzenleme anlık görüntüsü, yetki ve kasa toplamlarını sentetik kayıtlarla ROLLBACK içinde doğrular. İlk uygulama sonrası Security advisor'da yeni uyarı bulunmadı. Çalışma alanı bakımı sonrası kaynaklar mevcut canlı fonksiyon ve kayıtlı değişikliklerden geri kuruldu; 113 test ve SQL doğrulaması tekrar geçti.
