@@ -1,3 +1,4 @@
+import { createUnitPreference, MY_UNIT_KEY } from './my-unit.js?v=unit-1';
 import { decisionReadPayload } from './decision-reads.js?v=reads-1';
 import { sessionStorageFor, SESSION_KEY } from './session-storage.js?v=persistent-1';
 import { adminRequestFromHash } from './notification-links.js?v=push-link-1';
@@ -16,6 +17,8 @@ import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStat
 import { unpaidCharges, chargeRequest } from './charge-management.js';
 import { createApi } from './transport.js?v=reads-1';
 import { config } from './config.js?v=push-1';
+const unitPreference=createUnitPreference(window);
+let initialView=true,unitChooser=false;
 const storage=sessionStorageFor(window);
 const api=createApi({...config,storage});
 const push=createPush({api,publicKey:config.vapidPublicKey});
@@ -44,6 +47,7 @@ const unitName=id=>state.units.find(u=>u.id===id)?.label||'Bölüm';
 const noticeHTML=n=>'<article class="notice"><h3>'+esc(n.title)+'</h3><p>'+esc(n.body)+'</p><small>'+dateName(n.created_at)+'</small>'+(state.admin?' <button class="small danger" data-action="delete-notice" data-id="'+n.id+'">Kaldır</button>':'')+'</article>';
 async function refresh(){
  state=await api('state');
+ if(initialView){initialView=false;if(!state.admin&&unitPreference.get(state.units))tab='my-unit';}
  if(!state.admin){changeHistory=[];paymentNotices=[];paymentNoticeError='';residentRequests=[];requestError='';if(['history','payment-notices','requests'].includes(tab))tab='overview';}
  else if(tab==='history'){try{changeHistory=await api('history');historyError='';}catch(e){changeHistory=[];historyError=e.message;}}
  if(state.admin){try{paymentNotices=await api('payment-notices');paymentNoticeError='';}catch(e){paymentNoticeError=e.message;}}
@@ -261,6 +265,14 @@ async function confirmBatchUndo(id){
  if(!group.canUndo)throw new Error('Bu ödemenin bir kısmı iptal edilmiş veya geri alınmış. İşlem geçmişinden kayıtları kontrol edin.');
  openDialog('Toplam ödemeyi geri al','<p><strong>'+esc(unitName(group.unitId))+'</strong> · '+dateName(group.date)+'</p>'+table(['Ay','Geri alınacak'],group.allocations.map(a=>'<tr><td>'+esc(monthName(a.period))+'</td><td>'+money(a.amount)+'</td></tr>'))+'<div class="note"><p>Kasa değişimi: <strong>'+signedMoney(-group.amount)+'</strong></p><p>Aidat borcu değişimi: <strong>'+signedMoney(group.amount)+'</strong></p></div><p>Bu ödemeye ait bütün aylar birlikte geri alınsın mı?</p>',async()=>{await api('payments/batch/undo','POST',{id});toast('Toplam ödeme geri alındı.');},'Tüm ödemeyi geri al');$('#dialogSubmit').disabled=false;
 }
+function myUnitHTML(){
+ const id=unitPreference.get(state.units),unit=state.units.find(u=>u.id===id);
+ if(!unit||unitChooser)return '<section class="panel"><h2>Dairem</h2><p class="muted">Dairenizi seçin; borcunuzu ve ödemelerinizi tek ekranda görün.</p><form id="myUnitForm" class="setting-form"><label for="myUnitId">Daireniz / dükkânınız</label><select id="myUnitId" name="unitId" required><option value="">Seçin</option>'+state.units.map(u=>'<option value="'+u.id+'"'+(u.id===id?' selected':'')+'>'+esc(u.label)+'</option>').join('')+'</select><p class="help">Seçiminiz bu cihazda hatırlanır.</p><div class="actions"><button type="submit" class="primary">Dairemi göster</button>'+(unit?'<button type="button" class="outline" data-action="cancel-unit-choice">Vazgeç</button>':'')+'</div></form></section>';
+ const month=today().slice(0,7),charges=state.charges.filter(c=>c.unit_id===id),unpaid=charges.filter(c=>c.amount>c.paid).sort((a,b)=>b.period.localeCompare(a.period)||b.id-a.id);
+ const remaining=rows=>rows.reduce((sum,c)=>sum+c.amount-c.paid,0),total=remaining(charges),old=remaining(charges.filter(c=>c.period<month)),current=remaining(charges.filter(c=>c.period===month)),future=remaining(charges.filter(c=>c.period>month));
+ const payments=unitStatement(state,id).rows.filter(r=>r.type==='payment').reverse();
+ return '<div class="toolbar"><div><h2>Dairem · '+esc(unit.label)+'</h2>'+(unit.exempt?'<span class="badge">Yönetim kararı ile muaf</span>':'')+'</div><button class="outline small" data-action="choose-unit">Daireyi değiştir</button></div><div class="cards my-unit-cards">'+[['Toplam kalan borç',total],['Bu ay kalan',current],['Önceki aylardan kalan',old],...(future?[['Gelecek aylara ait',future]]:[])].map(([title,value])=>'<div class="card"><div class="label">'+title+'</div><div class="number">'+money(value)+'</div></div>').join('')+'</div><div class="overview-actions">'+noticeEntryButton(id)+'<button class="outline" data-action="unit-detail" data-id="'+id+'">Hesap dökümü</button></div>'+bankHTML()+'<section class="panel"><h3>Bekleyen borçlar</h3>'+table(['Dönem','Kalan'],unpaid.map(c=>'<tr><td>'+esc(monthName(c.period))+(c.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'</td><td>'+money(c.amount-c.paid)+'</td></tr>'),'Bekleyen borcunuz yok.')+'</section><section class="panel"><h3>Ödeme geçmişi</h3>'+table(['Tarih','Aidat ayı','Tutar',''],payments.map(p=>'<tr><td>'+dateName(p.date)+'</td><td>'+esc(monthName(p.period))+'</td><td>'+money(p.credit)+'</td><td><button class="outline small" data-action="receipt" data-id="'+p.id+'">Makbuz</button></td></tr>'),'Henüz kayıtlı ödemeniz yok.')+'</section>';
+}
 function moreLinks(){
  const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" '+(['request-new','push-settings'].includes(target)?'data-action="'+target+'"':'data-tab="'+target+'"')+'><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
  return '<section class="more-section"><h2>Bilgiler</h2>'+links([['push-settings','Bildirimler','Bu cihazın bildirimlerini yönet'],['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
@@ -275,7 +287,8 @@ function overviewHTML(){
 function render(){
  document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===tab||(e.dataset.tab==='more'&&['units','settings','notices','report','decisions','tasks','news','history','payment-notices','requests'].includes(tab))));
  const view=$('#view'),charges=state.charges.filter(c=>c.period===selectedMonth),expenses=state.expenses.filter(e=>e.date.startsWith(selectedMonth));
- if(tab==='requests'&&state.admin){view.innerHTML=residentRequestsHTML();
+ if(tab==='my-unit'){view.innerHTML=myUnitHTML();
+ }else if(tab==='requests'&&state.admin){view.innerHTML=residentRequestsHTML();
  }else if(tab==='overview'){
   view.innerHTML=overviewHTML();
  }else if(tab==='dues'){
@@ -448,6 +461,9 @@ document.addEventListener('change',e=>{
  else if(e.target.id==='selectAllCharges'){selectedCharges.clear();if(e.target.checked)for(const c of visibleUnpaidCharges())selectedCharges.add(c.id);syncChargeSelection();}
 });
 document.addEventListener('submit',async e=>{
+ if(e.target.id==='myUnitForm'){
+  e.preventDefault();try{const saved=unitPreference.set(new FormData(e.target).get('unitId'),state.units);unitChooser=false;render();toast(saved?'Daireniz seçildi.':'Daireniz seçildi. Bu cihazda kalıcı saklama kapalı.');}catch(err){error(err);}return;
+ }
  if(e.target.id==='bankForm'){
   e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;$('#bankError').textContent='';
   try{const f=new FormData(e.target),iban=normalizeIban(f.get('iban')),accountHolder=String(f.get('accountHolder')||'').trim();if(iban&&!accountHolder)throw new Error('Hesap sahibini girin.');
@@ -475,6 +491,8 @@ document.addEventListener('click',async e=>{
  else if(action==='receipt'){await refresh();showReceipt(id);}
  else if(action==='download-receipt'){btn.disabled=true;try{const current=await api('state');await downloadReceipt(paymentReceipt(current,id),receiptLink(location.href,id));}catch(err){$('#dialogError').textContent=err.message;}finally{btn.disabled=false;}}
  else if(action==='copy-receipt-link'){await copyPaymentText(receiptLink(location.href,id),'Makbuz bağlantısı kopyalandı.');}
+ else if(action==='choose-unit'){unitChooser=true;render();}
+ else if(action==='cancel-unit-choice'){unitChooser=false;render();}
  else if(action==='copy-iban'){if(!state.settings.iban)throw new Error('IBAN henüz eklenmedi.');await copyPaymentText(state.settings.iban,'IBAN kopyalandı.');}
  else if(action==='reminder'){
   if(!state.admin)throw new Error('Yönetici girişi gerekli.');
@@ -629,8 +647,9 @@ const installApp=initPwa({showStatus:toast,showGuide:kind=>{
 }});
 refresh().then(async()=>{const access=requestFromHash(location.hash);if(access)await showOwnRequest(access);else await followNotification();}).catch(error);
 window.addEventListener?.('storage',event=>{if(event.key===SESSION_KEY){$('#modal').close();refresh().then(()=>{if(state.admin)return followNotification();}).catch(error);}});
+window.addEventListener?.('storage',event=>{if(event.key===MY_UNIT_KEY||event.key===null){unitPreference.sync(event.key===null?null:event.newValue);if(state&&tab==='my-unit')render();}});
 window.addEventListener?.('hashchange',()=>{followNotification().catch(error);});
-setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&!$('#settingsForm')&&!$('#bankForm'))refresh().catch(error);},60000);
+setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&!$('#settingsForm')&&!$('#bankForm')&&!$('#myUnitForm'))refresh().catch(error);},60000);
 
 
 // iOS may ignore viewport zoom limits. Block only zoom gestures, preserving one-finger scrolling.

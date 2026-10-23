@@ -1,3 +1,5 @@
+import {createUnitPreference,MY_UNIT_KEY} from '../public/my-unit.js';
+import {unitStatement} from '../public/reports.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -15,7 +17,7 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,addEventListener(){},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({Intl,Date,Set,Number,String,Math,Error,JSON,console,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> 'test-stable-request'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
@@ -132,4 +134,25 @@ test('own tracking escapes complaint/reply and updates carry both stale guards',
  f.context.access={id,token};await f.run('showOwnRequest(access)');assert.match(f.element('#dialogFields').innerHTML,/&lt;script&gt;/);assert.match(f.element('#dialogFields').innerHTML,/Yapılıyor/);assert.doesNotMatch(f.element('#dialogFields').innerHTML,/<script>/);
  f.run(`residentRequests=[{id:'req',unit_id:1,title:'Lamba',status:'in_progress',reply:'',version:'r1',task_version:'t1'}];editRequestStatus('req')`);
  f.context.form=new Map([['status','done'],['reply','Onarıldı']]);await f.run('dialogAction(form)');const call=f.requests[1];assert.equal(call[2].taskVersion,'t1');assert.equal(call[2].version,'r1');assert.equal(call[2].status,'done');
+});
+
+test('My unit screen isolates balances and receipts, keeps old debt for exempt units, and prefills payment notice',async()=>{
+ const f=await fixture();
+ f.run(`state.admin=false;state.settings={iban:'',accountHolder:''};state.units=[{id:1,label:'Daire <1>',exempt:true},{id:2,label:'Daire 2'}];
+ const current=today().slice(0,7);state.charges=[{id:1,unit_id:1,period:'2000-01',amount:10000,paid:2500,kind:'opening',date:'2000-01-01'},{id:2,unit_id:1,period:current,amount:5000,paid:0},{id:3,unit_id:2,period:current,amount:999999,paid:0}];state.payments=[{id:10,charge_id:1,date:'2026-10-01',amount:2500},{id:20,charge_id:3,date:'2026-10-02',amount:999999}];`);
+ let html=f.run('myUnitHTML()');assert.match(html,/Dairemi göster/);
+ f.run('unitPreference.set(1,state.units)');html=f.run('myUnitHTML()');
+ assert.match(html,/Daire &lt;1&gt;/);assert.match(html,/Yönetim kararı ile muaf/);
+ assert.match(html,/125,00/);assert.match(html,/75,00/);assert.match(html,/50,00/);assert.match(html,/data-action="payment-notice" data-id="1"/);
+ assert.match(html,/data-action="receipt" data-id="10"/);assert.doesNotMatch(html,/data-id="20"|999\.999|Daire 2/);
+ f.run('openPaymentNotice(unitPreference.get(state.units))');assert.match(f.element('#dialogFields').innerHTML,/<option value="1" selected>/);
+ f.run('unitChooser=true');assert.match(f.run('myUnitHTML()'),/Vazgeç/);
+ f.run('unitChooser=false;unitPreference.set(2,state.units)');html=f.run('myUnitHTML()');assert.match(html,/Daire 2/);assert.doesNotMatch(html,/data-id="10"/);
+ f.run('state.units=[]');assert.match(f.run('myUnitHTML()'),/Dairemi göster/);
+});
+test('A remembered unit opens on resident startup while administrator startup keeps the overview',async()=>{
+ const base={admin:false,settings:{name:'Test',iban:''},units:[{id:1,label:'Daire 1'}],charges:[],payments:[],expenses:[],tasks:[],decisions:[],notices:[],totals:{cash:0,receivable:0}};
+ const f=await fixture(path=>path==='state'?base:[]);
+ f.run('unitPreference.set(1,state.units);overviewHTML=()=>"OVERVIEW";syncChargeSelection=()=>{};');await f.run('refresh()');assert.equal(f.run('tab'),'my-unit');
+ base.admin=true;f.run("initialView=true;tab='overview';");await f.run('refresh()');assert.equal(f.run('tab'),'overview');
 });
