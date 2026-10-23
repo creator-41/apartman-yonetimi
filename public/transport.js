@@ -102,6 +102,7 @@ export function createApi({url,key,storage,fetchImpl=globalThis.fetch,now=Date.n
       throw new Error('Geçersiz dekont işlemi.');
     }
     if(path==='payment-notices')return rpc('apartman_notice_list',{});
+    if(path==='payment-notices/track'&&method==='POST')return rpc('apartman_notice_track',{payload:data});
     if(path==='payment-notices/submit'&&method==='POST')return rpc('apartman_notice_submit',{payload:data});
     if(path==='payment-notices/complete'&&method==='POST')return rpc('apartman_notice_complete',{payload:data});
     if(path==='payment-notices/review'&&method==='POST')return rpc('apartman_notice_review',{payload:data});

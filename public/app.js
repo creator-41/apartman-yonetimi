@@ -1,10 +1,11 @@
+import { createNoticeBook, NOTICE_TRACKING_KEY, ownNoticeStatus } from './notice-tracking.js?v=track-1';
 import { createUnitPreference, MY_UNIT_KEY } from './my-unit.js?v=unit-1';
 import { decisionReadPayload } from './decision-reads.js?v=reads-1';
 import { sessionStorageFor, SESSION_KEY } from './session-storage.js?v=persistent-1';
 import { adminRequestFromHash } from './notification-links.js?v=push-link-1';
 import { createPush } from './push.js?v=push-1';
 import { requestStatus, requestPayload, sendRequest, requestLink, requestFromHash, requestChange } from './requests.js?v=request-1';
-import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from './payment-notices.js?v=request-1';
+import { noticePayload, sendPaymentNotice, waitingNotices, noticeStatus } from './payment-notices.js?v=track-1';
 import { unitPaymentPlan } from './unit-payments.js?v=request-1';
 import { initPwa } from './pwa.js?v=push-1';
 import { filterUnits } from './dues-filters.js?v=request-1';
@@ -15,8 +16,10 @@ import { openTasks, taskSave, statusName } from './work.js?v=request-1';
 import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=request-1';
 import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStatementText } from './reports.js?v=summary-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=reads-1';
+import { createApi } from './transport.js?v=track-1';
 import { config } from './config.js?v=push-1';
+const noticeBook=createNoticeBook(window);
+let ownNotices=[],ownNoticeError="",ownNoticeLoad=0;
 const unitPreference=createUnitPreference(window);
 let initialView=true,unitChooser=false;
 const storage=sessionStorageFor(window);
@@ -56,6 +59,7 @@ async function refresh(){
  $('#mode').textContent=state.admin?'Yönetici paneli':'Ortak takip ekranı';$('#auth').textContent=state.admin?'Çıkış yap':'Yönetici girişi';
  document.querySelectorAll('.admin-only').forEach(e=>e.hidden=!state.admin);
  if(!state.admin&&['units','settings','history','payment-notices','requests'].includes(tab))tab='overview';
+ if(tab==='my-unit')await loadOwnNotices();
  $('#error').hidden=true;render();
  push.sync({admin:state.admin}).catch(()=>{});
 }
@@ -202,18 +206,19 @@ function noticeQueueCard(){
  return '<section class="panel notice-queue"><div><h3>Ödeme bildirimleri'+(paymentNoticeError?'':' · '+count+' bekleyen')+'</h3><p class="muted">'+(paymentNoticeError?'Bildirimler alınamadı. Yenileyip tekrar kontrol edin.':'Komşuların bildirdiği ödemeleri banka hesabından kontrol edin.')+'</p></div><button class="outline" data-tab="payment-notices">'+(count?'Bildirimleri incele':'Bildirimler')+'</button></section>';
 }
 function openPaymentNotice(unitId){
- const requestId=crypto.randomUUID();let frozen;
+ const requestId=crypto.randomUUID(),trackingToken=crypto.randomUUID();let frozen;
  const choices=state.units.map(u=>'<option value="'+u.id+'"'+(u.id===unitId?' selected':'')+'>'+esc(u.label)+'</option>').join('');
  openDialog('Ödeme yaptım','<label for="f-unitId">Daireniz / dükkânınız</label><select id="f-unitId" name="unitId" required><option value="">Seçin</option>'+choices+'</select>'+input('amount','Ödediğiniz tutar (TL)','number','','required min="0.01" max="10000000" step="0.01"')+input('date','Ödeme tarihi','date',today(),'required min="2000-01-01" max="'+today()+'"')+input('note','Not (isteğe bağlı)','text','','maxlength="200"')+'<label for="f-receipt">Dekont (isteğe bağlı)</label><input id="f-receipt" name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf"><p class="help">JPG, PNG, WEBP veya PDF · En fazla 5 MB. Bildirim ve dekont yalnızca yönetime görünür.</p><p class="note">Yönetici ödemeyi onayladıktan sonra borcunuzdan düşer.</p>',async f=>{
-  const file=$('#f-receipt').files?.[0],payload=noticePayload({requestId,unitId:Number(f.get('unitId')),amount:f.get('amount'),date:f.get('date'),note:f.get('note')||'',file},today());
+  const file=$('#f-receipt').files?.[0],payload={...noticePayload({requestId,unitId:Number(f.get('unitId')),amount:f.get('amount'),date:f.get('date'),note:f.get('note')||'',file},today()),trackingToken};
   if(frozen&&JSON.stringify(frozen)!==JSON.stringify(payload))throw new Error('İlk gönderimin sonucu belirsiz olabilir. Bilgileri değiştirmeden tekrar deneyin veya yöneticiyle kontrol edin.');
-  frozen=payload;uploadingDocument=true;
-  try{createdNoticeAcknowledgement=await sendPaymentNotice(api,payload,file);toast('Ödeme bildirimi gönderildi.');}catch(error){if(error.noticeSubmissionRejected)frozen=null;throw error;}finally{uploadingDocument=false;}
+  frozen=payload;
+  const trackingSaved=noticeBook.remember({id:requestId,token:trackingToken,unitId:payload.unitId});uploadingDocument=true;
+  try{createdNoticeAcknowledgement={...await sendPaymentNotice(api,payload,file),unitId:payload.unitId,trackingSaved};toast('Ödeme bildirimi gönderildi.');}catch(error){if(error.noticeSubmissionRejected){frozen=null;noticeBook.forget(requestId);}throw error;}finally{uploadingDocument=false;}
  },'Bildirimi gönder');
 }
 function showNoticeAcknowledgement(result){
  const message=result.status==='approved'?'Bu bildirim daha önce onaylandı. Güncel borcunuzu hesap dökümünden kontrol edebilirsiniz.':result.status==='rejected'?'Bu bildirim yönetici tarafından reddedilmiş. Yöneticiyle görüşebilirsiniz.':'Yönetici banka hesabını kontrol edip onaylayınca ödeme borcunuzdan düşecek.';
- openReadDialog('Ödeme bildirimi alındı','<p>Bildirim no: <strong>'+esc(result.id.slice(0,8))+'</strong></p><p>'+esc(noticeStatus(result.status))+'</p><p>'+message+'</p>');
+ openReadDialog('Ödeme bildirimi alındı','<p>Bildirim no: <strong>'+esc(result.id.slice(0,8))+'</strong></p><p>'+esc(ownNoticeStatus(result.status))+'</p><p>'+message+'</p><button type="button" class="primary" data-action="own-notices" data-id="'+result.unitId+'">Dairem’de takip et</button>'+(result.trackingSaved===false?'<p class="help">Bu cihazda saklama kapalı; takip bu sayfa açıkken kullanılabilir.</p>':''));
 }
 function paymentNoticesHTML(){
  const row=n=>'<article class="change-item"><div class="toolbar"><div><h3>'+esc(unitName(n.unit_id))+' · '+money(n.amount)+'</h3><span class="badge">'+esc(noticeStatus(n.status))+'</span></div><button class="outline small" data-action="notice-detail" data-notice-id="'+esc(n.id)+'">İncele</button></div><p>'+dateName(n.date)+' · Bildirim '+esc(n.id.slice(0,8))+'</p><small>'+esc(timeName(n.created_at))+'</small></article>';
@@ -229,7 +234,7 @@ function reviewNotice(id,approve){
  if(!state.admin)throw new Error('Yönetici girişi gerekli.');
  const n=paymentNotices.find(n=>n.id===id);if(!n)throw new Error('Bildirim bulunamadı. Listeyi yenileyin.');
  const plan=approve?unitPaymentPlan(state.charges,n.unit_id,n.amount/100):null;
- openDialog(approve?'Ödeme bildirimini onayla':'Ödeme bildirimini reddet','<p><strong>'+esc(unitName(n.unit_id))+'</strong> · '+money(n.amount)+' · '+dateName(n.date)+'</p>'+(approve?unitPaymentPreview(plan)+'<label class="check"><input type="checkbox" name="confirmed" required> Banka hesabına gelen ödemeyi kontrol ettim; bu ödeme daha önce kaydedilmedi.</label>':'<p>Bildirim reddedilecek. Kasa ve borç değişmeyecek.</p>')+input('note','Yönetici notu (isteğe bağlı)','text','','maxlength="200"'),async f=>{
+ openDialog(approve?'Ödeme bildirimini onayla':'Ödeme bildirimini reddet','<p><strong>'+esc(unitName(n.unit_id))+'</strong> · '+money(n.amount)+' · '+dateName(n.date)+'</p>'+(approve?unitPaymentPreview(plan)+'<label class="check"><input type="checkbox" name="confirmed" required> Banka hesabına gelen ödemeyi kontrol ettim; bu ödeme daha önce kaydedilmedi.</label>':'<p>Bildirim reddedilecek. Kasa ve borç değişmeyecek.</p>')+input('note','Komşuya açıklama (isteğe bağlı)','text','','maxlength="200"')+'<p class="help">Bildirim sahibi bu açıklamayı görebilir.</p>',async f=>{
   const result=await api('payment-notices/review','POST',{id,operation:approve?'approve':'reject',confirmed:f.get('confirmed')==='on',expected:plan?.expected,note:f.get('note')||''});
   if(approve){createdPaymentGroup=result.group;createdPaymentId=null;}
   toast(approve?'Bildirim onaylandı; tahsilat kaydedildi.':'Bildirim reddedildi.');
@@ -265,13 +270,23 @@ async function confirmBatchUndo(id){
  if(!group.canUndo)throw new Error('Bu ödemenin bir kısmı iptal edilmiş veya geri alınmış. İşlem geçmişinden kayıtları kontrol edin.');
  openDialog('Toplam ödemeyi geri al','<p><strong>'+esc(unitName(group.unitId))+'</strong> · '+dateName(group.date)+'</p>'+table(['Ay','Geri alınacak'],group.allocations.map(a=>'<tr><td>'+esc(monthName(a.period))+'</td><td>'+money(a.amount)+'</td></tr>'))+'<div class="note"><p>Kasa değişimi: <strong>'+signedMoney(-group.amount)+'</strong></p><p>Aidat borcu değişimi: <strong>'+signedMoney(group.amount)+'</strong></p></div><p>Bu ödemeye ait bütün aylar birlikte geri alınsın mı?</p>',async()=>{await api('payments/batch/undo','POST',{id});toast('Toplam ödeme geri alındı.');},'Tüm ödemeyi geri al');$('#dialogSubmit').disabled=false;
 }
+async function loadOwnNotices(){
+ const load=++ownNoticeLoad,id=unitPreference.get(state.units),entries=noticeBook.entries(id);
+ ownNotices=[];ownNoticeError='';if(!entries.length)return;
+ try{const rows=await api('payment-notices/track','POST',entries.map(({id,token})=>({id,token})));if(load===ownNoticeLoad)ownNotices=rows.filter(n=>n.unit_id===id);}
+ catch{if(load===ownNoticeLoad)ownNoticeError='Bildirim durumları alınamadı. Bağlantınızı kontrol edip yenileyin.';}
+}
+function ownNoticesHTML(id){
+ const rows=ownNotices.filter(n=>n.unit_id===id);
+ return '<section class="panel"><div class="toolbar"><h3>Ödeme bildirimlerim</h3><button class="outline small" data-action="refresh-own-notices">Durumları yenile</button></div><p class="help">Bu cihazdan gönderdiğiniz bildirimleri burada takip edebilirsiniz.</p>'+(ownNoticeError?'<p role="alert">'+esc(ownNoticeError)+'</p>':rows.map(n=>'<article class="notice"><div class="toolbar"><strong>'+money(n.amount)+' · '+dateName(n.date)+'</strong><span class="badge">'+esc(ownNoticeStatus(n.status))+'</span></div><small>Bildirim '+esc(n.id.slice(0,8))+'</small>'+(n.review_note?'<p>Yönetici açıklaması: '+esc(n.review_note)+'</p>':'')+(n.status==='approved'?(n.payments.some(p=>!p.active)?'<p class="help">Bu tahsilatın bir kısmı veya tamamı sonradan geri alınmış. Güncel borcunuzu kontrol edin.</p>':'')+'<div class="actions">'+n.payments.filter(p=>p.active).map(p=>'<button class="outline small" data-action="receipt" data-id="'+p.id+'">'+esc(monthName(p.period))+' · Makbuz</button>').join('')+'</div>':'')+'</article>').join('')||'<p class="empty">Bu daireye ait takip edilebilir bildirim yok.</p>')+'</section>';
+}
 function myUnitHTML(){
  const id=unitPreference.get(state.units),unit=state.units.find(u=>u.id===id);
  if(!unit||unitChooser)return '<section class="panel"><h2>Dairem</h2><p class="muted">Dairenizi seçin; borcunuzu ve ödemelerinizi tek ekranda görün.</p><form id="myUnitForm" class="setting-form"><label for="myUnitId">Daireniz / dükkânınız</label><select id="myUnitId" name="unitId" required><option value="">Seçin</option>'+state.units.map(u=>'<option value="'+u.id+'"'+(u.id===id?' selected':'')+'>'+esc(u.label)+'</option>').join('')+'</select><p class="help">Seçiminiz bu cihazda hatırlanır.</p><div class="actions"><button type="submit" class="primary">Dairemi göster</button>'+(unit?'<button type="button" class="outline" data-action="cancel-unit-choice">Vazgeç</button>':'')+'</div></form></section>';
  const month=today().slice(0,7),charges=state.charges.filter(c=>c.unit_id===id),unpaid=charges.filter(c=>c.amount>c.paid).sort((a,b)=>b.period.localeCompare(a.period)||b.id-a.id);
  const remaining=rows=>rows.reduce((sum,c)=>sum+c.amount-c.paid,0),total=remaining(charges),old=remaining(charges.filter(c=>c.period<month)),current=remaining(charges.filter(c=>c.period===month)),future=remaining(charges.filter(c=>c.period>month));
  const payments=unitStatement(state,id).rows.filter(r=>r.type==='payment').reverse();
- return '<div class="toolbar"><div><h2>Dairem · '+esc(unit.label)+'</h2>'+(unit.exempt?'<span class="badge">Yönetim kararı ile muaf</span>':'')+'</div><button class="outline small" data-action="choose-unit">Daireyi değiştir</button></div><div class="cards my-unit-cards">'+[['Toplam kalan borç',total],['Bu ay kalan',current],['Önceki aylardan kalan',old],...(future?[['Gelecek aylara ait',future]]:[])].map(([title,value])=>'<div class="card"><div class="label">'+title+'</div><div class="number">'+money(value)+'</div></div>').join('')+'</div><div class="overview-actions">'+noticeEntryButton(id)+'<button class="outline" data-action="unit-detail" data-id="'+id+'">Hesap dökümü</button></div>'+bankHTML()+'<section class="panel"><h3>Bekleyen borçlar</h3>'+table(['Dönem','Kalan'],unpaid.map(c=>'<tr><td>'+esc(monthName(c.period))+(c.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'</td><td>'+money(c.amount-c.paid)+'</td></tr>'),'Bekleyen borcunuz yok.')+'</section><section class="panel"><h3>Ödeme geçmişi</h3>'+table(['Tarih','Aidat ayı','Tutar',''],payments.map(p=>'<tr><td>'+dateName(p.date)+'</td><td>'+esc(monthName(p.period))+'</td><td>'+money(p.credit)+'</td><td><button class="outline small" data-action="receipt" data-id="'+p.id+'">Makbuz</button></td></tr>'),'Henüz kayıtlı ödemeniz yok.')+'</section>';
+ return '<div class="toolbar"><div><h2>Dairem · '+esc(unit.label)+'</h2>'+(unit.exempt?'<span class="badge">Yönetim kararı ile muaf</span>':'')+'</div><button class="outline small" data-action="choose-unit">Daireyi değiştir</button></div><div class="cards my-unit-cards">'+[['Toplam kalan borç',total],['Bu ay kalan',current],['Önceki aylardan kalan',old],...(future?[['Gelecek aylara ait',future]]:[])].map(([title,value])=>'<div class="card"><div class="label">'+title+'</div><div class="number">'+money(value)+'</div></div>').join('')+'</div><div class="overview-actions">'+noticeEntryButton(id)+'<button class="outline" data-action="unit-detail" data-id="'+id+'">Hesap dökümü</button></div>'+bankHTML()+ownNoticesHTML(id)+'<section class="panel"><h3>Bekleyen borçlar</h3>'+table(['Dönem','Kalan'],unpaid.map(c=>'<tr><td>'+esc(monthName(c.period))+(c.kind==='opening'?'<small class="ledger-period">Devir borcu</small>':'')+'</td><td>'+money(c.amount-c.paid)+'</td></tr>'),'Bekleyen borcunuz yok.')+'</section><section class="panel"><h3>Ödeme geçmişi</h3>'+table(['Tarih','Aidat ayı','Tutar',''],payments.map(p=>'<tr><td>'+dateName(p.date)+'</td><td>'+esc(monthName(p.period))+'</td><td>'+money(p.credit)+'</td><td><button class="outline small" data-action="receipt" data-id="'+p.id+'">Makbuz</button></td></tr>'),'Henüz kayıtlı ödemeniz yok.')+'</section>';
 }
 function moreLinks(){
  const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" '+(['request-new','push-settings'].includes(target)?'data-action="'+target+'"':'data-tab="'+target+'"')+'><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
@@ -462,7 +477,7 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('submit',async e=>{
  if(e.target.id==='myUnitForm'){
-  e.preventDefault();try{const saved=unitPreference.set(new FormData(e.target).get('unitId'),state.units);unitChooser=false;render();toast(saved?'Daireniz seçildi.':'Daireniz seçildi. Bu cihazda kalıcı saklama kapalı.');}catch(err){error(err);}return;
+  e.preventDefault();try{const saved=unitPreference.set(new FormData(e.target).get('unitId'),state.units);unitChooser=false;await refresh();toast(saved?'Daireniz seçildi.':'Daireniz seçildi. Bu cihazda kalıcı saklama kapalı.');}catch(err){error(err);}return;
  }
  if(e.target.id==='bankForm'){
   e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;$('#bankError').textContent='';
@@ -474,7 +489,7 @@ document.addEventListener('submit',async e=>{
  try{const f=new FormData(e.target);await api('settings','PUT',{name:f.get('name'),monthlyDues:Number(f.get('monthlyDues')),openingBalance:Number(f.get('openingBalance'))});await refresh();toast('Ayarlar kaydedildi.');}catch(err){error(err);}finally{button.disabled=false;}
 });
 document.addEventListener('click',async e=>{
- const nav=e.target.closest('[data-tab]');if(nav){tab=nav.dataset.tab;if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
+ const nav=e.target.closest('[data-tab]');if(nav){tab=nav.dataset.tab;if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
  const btn=e.target.closest('[data-action]');if(!btn)return;
  e.preventDefault();
  const action=btn.dataset.action,id=Number(btn.dataset.id);
@@ -491,6 +506,8 @@ document.addEventListener('click',async e=>{
  else if(action==='receipt'){await refresh();showReceipt(id);}
  else if(action==='download-receipt'){btn.disabled=true;try{const current=await api('state');await downloadReceipt(paymentReceipt(current,id),receiptLink(location.href,id));}catch(err){$('#dialogError').textContent=err.message;}finally{btn.disabled=false;}}
  else if(action==='copy-receipt-link'){await copyPaymentText(receiptLink(location.href,id),'Makbuz bağlantısı kopyalandı.');}
+ else if(action==='own-notices'){unitPreference.set(id,state.units);unitChooser=false;tab='my-unit';await refresh();}
+ else if(action==='refresh-own-notices'){await refresh();}
  else if(action==='choose-unit'){unitChooser=true;render();}
  else if(action==='cancel-unit-choice'){unitChooser=false;render();}
  else if(action==='copy-iban'){if(!state.settings.iban)throw new Error('IBAN henüz eklenmedi.');await copyPaymentText(state.settings.iban,'IBAN kopyalandı.');}
@@ -648,6 +665,7 @@ const installApp=initPwa({showStatus:toast,showGuide:kind=>{
 refresh().then(async()=>{const access=requestFromHash(location.hash);if(access)await showOwnRequest(access);else await followNotification();}).catch(error);
 window.addEventListener?.('storage',event=>{if(event.key===SESSION_KEY){$('#modal').close();refresh().then(()=>{if(state.admin)return followNotification();}).catch(error);}});
 window.addEventListener?.('storage',event=>{if(event.key===MY_UNIT_KEY||event.key===null){unitPreference.sync(event.key===null?null:event.newValue);if(state&&tab==='my-unit')render();}});
+window.addEventListener?.('storage',event=>{if(event.key===NOTICE_TRACKING_KEY||event.key===null){noticeBook.sync(event.key===null?null:event.newValue);if(state&&tab==='my-unit')refresh().catch(error);}});
 window.addEventListener?.('hashchange',()=>{followNotification().catch(error);});
 setInterval(()=>{if(!$('#modal').open&&!document.hidden&&document.activeElement?.id!=='unitSearch'&&!$('#settingsForm')&&!$('#bankForm')&&!$('#myUnitForm'))refresh().catch(error);},60000);
 
