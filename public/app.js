@@ -1,3 +1,4 @@
+import {budgetSummary,budgetItem} from './budget.js?v=budget-1';
 import {annualDues,filterAnnualDues,annualStatus,MONTHS} from './annual-dues.js?v=grid-1';
 import {downloadAnnualWorkbook} from './annual-xlsx.js?v=grid-1';
 import { createNoticeBook, NOTICE_TRACKING_KEY, ownNoticeStatus } from './notice-tracking.js?v=track-1';
@@ -18,7 +19,7 @@ import { openTasks, taskSave, statusName } from './work.js?v=request-1';
 import { expenseUpdate, uploadReceipt, removeReceipt } from './expense-files.js?v=request-1';
 import { monthReport, monthReportText, monthSummaryText, unitStatement, unitStatementText } from './reports.js?v=summary-1';
 import { unpaidCharges, chargeRequest } from './charge-management.js';
-import { createApi } from './transport.js?v=expense-guard-1';
+import { createApi } from './transport.js?v=budget-1';
 import { config } from './config.js?v=push-1';
 const noticeBook=createNoticeBook(window);
 let ownNotices=[],ownNoticeError="",ownNoticeLoad=0;
@@ -41,6 +42,7 @@ let unitPaymentContext=null,createdPaymentGroup=null;
 let paymentNotices=[],paymentNoticeError="",createdNoticeAcknowledgement=null;
 let residentRequests=[],requestError="",requestFilter="open",requestAccess=null,createdResidentRequest=null;
 let changeHistory=[],historyError="";
+let budgetPlan=null,budgetError="",budgetLoading=false,budgetLoad=0;
 'use strict';
 let state,tab='overview',selectedMonth=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Istanbul',year:'numeric',month:'2-digit'}).format(new Date()),dialogAction;
 let annualYear=Number(selectedMonth.slice(0,4)),annualQuery="",annualDebtOnly=false,userNavigated=false;
@@ -55,14 +57,15 @@ const noticeHTML=n=>'<article class="notice"><h3>'+esc(n.title)+'</h3><p>'+esc(n
 async function refresh(){
  state=await api('state');
  if(initialView){initialView=false;if(!userNavigated&&!state.admin&&unitPreference.get(state.units))tab='my-unit';}
- if(!state.admin){changeHistory=[];paymentNotices=[];paymentNoticeError='';residentRequests=[];requestError='';if(['history','payment-notices','requests'].includes(tab))tab='overview';}
+ if(!state.admin){budgetLoad++;budgetPlan=null;budgetError='';budgetLoading=false;changeHistory=[];paymentNotices=[];paymentNoticeError='';residentRequests=[];requestError='';if(['history','payment-notices','requests'].includes(tab))tab='overview';}
  else if(tab==='history'){try{changeHistory=await api('history');historyError='';}catch(e){changeHistory=[];historyError=e.message;}}
  if(state.admin){try{paymentNotices=await api('payment-notices');paymentNoticeError='';}catch(e){paymentNoticeError=e.message;}}
  if(state.admin){try{residentRequests=await api('requests');requestError='';}catch(e){requestError=e.message;}}
  $('#building').textContent=state.settings.name;document.title=state.settings.name+' · Komşu';
  $('#mode').textContent=state.admin?'Yönetici paneli':'Ortak takip ekranı';$('#auth').textContent=state.admin?'Çıkış yap':'Yönetici girişi';
  document.querySelectorAll('.admin-only').forEach(e=>e.hidden=!state.admin);
- if(!state.admin&&['units','settings','history','payment-notices','requests'].includes(tab))tab='overview';
+ if(!state.admin&&['units','settings','history','payment-notices','requests','budget'].includes(tab))tab='overview';
+ if(tab==='budget'&&state.admin)await loadBudget();
  if(tab==='my-unit')await loadOwnNotices();
  $('#error').hidden=true;render();
  push.sync({admin:state.admin}).catch(()=>{});
@@ -304,7 +307,7 @@ function myUnitHTML(){
 }
 function moreLinks(){
  const links=items=>'<div class="more-grid">'+items.map(([target,title,help])=>'<button class="panel more-link" '+(['request-new','push-settings'].includes(target)?'data-action="'+target+'"':'data-tab="'+target+'"')+'><strong>'+title+'</strong><span>'+help+'</span></button>').join('')+'</div>';
- return '<section class="more-section"><h2>Bilgiler</h2>'+links([['push-settings','Bildirimler','Bu cihazın bildirimlerini yönet'],['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
+ return '<section class="more-section"><h2>Bilgiler</h2>'+links([['push-settings','Bildirimler','Bu cihazın bildirimlerini yönet'],['request-new','Arıza / talep bildir','Yönetime bildirim gönder'],['report','Aylık bilanço','Tahsilat, harcama ve borçlar'],['notices','Duyurular','Apartmandan haberler'],['decisions','Kararlar','Alınan kararlar ve belgeler'],['tasks','Yapılacak işler','Sorumlular ve durumlar']])+'<button class="outline install-menu" data-action="install-app">Telefona ekle</button></section>'+(state.admin?'<section class="more-section"><h2>Yönetici işlemleri</h2>'+links([['requests','Arıza ve talepler','Durumlar ve görev oluşturma'],['payment-notices','Ödeme bildirimleri','Onay bekleyen ödemeler'],['history','İşlem geçmişi','Ödeme ve gider işlemlerini geri al'],['units','Daireler ve dükkân','Bilgiler ve muafiyet'],['budget','Aidat yeterlilik hesabı','Düzenli giderler ve gereken aidat'],['settings','Yönetim','IBAN, ayarlar ve yedek']])+'<button class="outline install-menu" data-action="opening-charge">Eski borç girişi</button></section>':'');
 }
 function pendingUnits(){return state.units.map(u=>({u,total:state.charges.filter(c=>c.unit_id===u.id).reduce((sum,c)=>sum+c.amount-c.paid,0)})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total||a.u.id-b.u.id);}
 function pendingRows(rows){return rows.map(({u,total})=>'<button class="pending-row" data-action="unit-detail" data-id="'+u.id+'"><strong>'+esc(u.label)+'</strong><span>'+money(total)+' <span aria-hidden="true">›</span></span></button>').join('');}
@@ -314,7 +317,7 @@ function managerOverviewHTML(){
  const priorities='<div class="manager-priorities"><button class="panel priority-card" data-tab="payment-notices"><span>Bekleyen ödemeler</span><strong>'+(paymentNoticeError?'—':notices.length)+'</strong><small>'+(paymentNoticeError?'Alınamadı · Kontrol et':'Ödeme bildirimlerini incele')+'</small></button><button class="panel priority-card" data-tab="requests"><span>Açık arıza ve talepler</span><strong>'+(requestError?'—':requests.length)+'</strong><small>'+(requestError?'Alınamadı · Kontrol et':'Talepleri incele')+'</small></button><button class="panel priority-card total" data-tab="dues"><span>Toplam alacak</span><strong>'+money(state.totals.receivable)+'</strong><small>Önceki aylardan: '+money(old)+'</small></button></div>';
  const debtors='<section class="panel"><div class="toolbar"><h3>Ödeme bekleyen daireler</h3>'+(pending.length>3?'<button class="small outline" data-action="show-pending">Tümü ('+pending.length+')</button>':'')+'</div>'+pendingRows(pending.slice(0,3))+(pending.length?'':'<p class="muted">Bekleyen aidat borcu yok.</p>')+'</section>';
  const taskList=tasks.length?'<section class="panel"><div class="toolbar"><h3>Yapılacak işler</h3><button class="small outline" data-tab="tasks">Tümü ('+tasks.length+')</button></div>'+tasks.slice(0,3).map(taskRow).join('')+'</section>':'';
- return '<h2>Yönetici özeti</h2>'+priorities+'<div class="overview-actions"><button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button><button class="outline" data-tab="report">Aylık bilanço</button></div>'+debtors+taskList+disclosure('manager-finances','Aylık mali özet','<div class="toolbar">'+monthFilter()+'</div>'+cards())+disclosure('manager-news','Apartmandan haberler',newsHTML(1,true)+'<button class="outline small" data-tab="news">Tüm haberler</button>');
+ return '<h2>Yönetici özeti</h2>'+priorities+'<div class="overview-actions"><button class="primary" data-tab="dues">Ödeme al</button><button class="outline" data-action="expense">Gider ekle</button><button class="outline" data-tab="report">Aylık bilanço</button></div>'+debtors+taskList+'<section class="panel"><div class="toolbar"><div><h3>Aidat giderleri karşılıyor mu?</h3><p class="muted">Düzenli giderleri ve bölüm başına gereken tutarı hesapla.</p></div><button class="outline" data-tab="budget">Aidat yeterlilik hesabı</button></div></section>'+disclosure('manager-finances','Aylık mali özet','<div class="toolbar">'+monthFilter()+'</div>'+cards())+disclosure('manager-news','Apartmandan haberler',newsHTML(1,true)+'<button class="outline small" data-tab="news">Tüm haberler</button>');
 }
 function overviewHTML(){
  const charges=state.charges.filter(c=>c.period===selectedMonth),expected=charges.reduce((sum,c)=>sum+c.amount,0),paid=charges.reduce((sum,c)=>sum+c.paid,0),paidCount=charges.filter(c=>c.paid>=c.amount).length;
@@ -361,6 +364,8 @@ function render(){
   view.innerHTML='<section class="panel"><div class="toolbar"><h2>Apartmandan haberler</h2></div>'+newsHTML()+'</section>';
  }else if(tab==='decisions'||tab==='tasks'){
   view.innerHTML=workHTML();
+ }else if(tab==='budget'&&state.admin){
+  view.innerHTML=budgetHTML();
  }else if(tab==='report'){
   view.innerHTML=reportHTML();
  }else if(tab==='more'){
@@ -394,6 +399,36 @@ function shareButtons(){return '<div class="actions report-actions"><button type
 function downloadText(text,name){
  const url=URL.createObjectURL(new Blob(['\uFEFF'+text],{type:'text/plain;charset=utf-8'}));
  const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function loadBudget(){
+ const request=++budgetLoad;
+ try{const plan=await api('budget');if(request===budgetLoad&&state.admin){budgetPlan=plan;budgetError='';}}
+ catch(e){if(request===budgetLoad){budgetPlan=null;budgetError=e.message;}}
+ finally{if(request===budgetLoad)budgetLoading=false;}
+}
+function budgetHTML(){
+ if(!state.admin)return '';
+ const title='<div class="toolbar"><div><p class="eyebrow">Aylık gider planı</p><h2>Aidat yeterlilik hesabı</h2></div><div class="actions"><button class="outline small" data-action="budget-retry">Yenile</button><button class="outline small" data-tab="overview">Özete dön</button></div></div>';
+ if(budgetLoading)return title+'<p class="empty">Gider planı yükleniyor…</p>';
+ if(budgetError||!budgetPlan)return title+'<section class="panel"><p role="alert">Plan alınamadı. '+esc(budgetError)+'</p><button class="outline" data-action="budget-retry">Tekrar dene</button></section>';
+ const r=budgetSummary(state,budgetPlan.items),hasItems=budgetPlan.items.length>0;
+ const result=!hasItems?'Hesaplamak için düzenli gider ekleyin.':!r.payerCount?'Aidat ödeyecek bölüm yok. Bölüm başına tutar hesaplanamıyor.':r.balance<0?'Aylık '+money(-r.balance)+' açık var.':r.balance>0?'Aylık '+money(r.balance)+' fazla kalıyor.':'Aidat planlanan giderleri tam karşılıyor.';
+ return title+'<section class="panel"><p>Güncel aidat <strong>'+money(r.dues)+'</strong> × <strong>'+r.payerCount+' ödeme yapacak bölüm</strong>'+ (r.exemptCount?' · '+r.exemptCount+' muaf bölüm':'')+'</p><div class="balance-cards">'+[['Beklenen aylık aidat',r.expected],['Planlanan aylık gider',r.expense]].map(([label,value])=>'<div><span>'+label+'</span><strong>'+money(value)+'</strong></div>').join('')+'</div><p class="budget-result '+(hasItems&&r.balance<0?'budget-shortfall':'')+'">'+result+'</p>'+(hasItems&&r.payerCount?'<div class="unit-balance-parts"><span>Giderleri karşılayan bölüm başına aidat <strong>'+money(r.required)+'</strong></span>'+(r.extra?'<span>Mevcut aidata göre ek ihtiyaç <strong>'+money(r.extra)+' / bölüm</strong></span>':'')+'</div>':'')+'<p class="help">Tüm muaf olmayan daire ve dükkânların aynı aidatı eksiksiz ödediği varsayılır. Yalnızca aşağıdaki giderler hesaba katılır. Kasa bakiyesi, geçmiş borçlar ve gerçek tahsilatlar bu planın dışında kalır.</p></section><section class="panel"><div class="toolbar"><h3>Düzenli aylık giderler</h3><button class="primary" data-action="budget-add" '+(budgetPlan.items.length>=50?'disabled':'')+'>Gider planla</button></div>'+table(['Gider','Aylık tutar',''],budgetPlan.items.map((item,index)=>'<tr><td class="expense-name">'+esc(item.label)+'</td><td>'+money(item.amount)+'</td><td><div class="actions"><button class="outline small" data-action="budget-edit" data-id="'+index+'">Düzenle</button><button class="danger small" data-action="budget-delete" data-id="'+index+'">Kaldır</button></div></td></tr>'),'Temizlik, elektrik gibi düzenli giderlerin aylık tahmini tutarını ekleyin.')+'<p class="help">Bu bir planlama hesabıdır. Planı kaydetmek aidatı değiştirmez, borç veya gerçek gider oluşturmaz.</p></section>';
+}
+function editBudgetItem(index=null){
+ if(!state.admin||!budgetPlan||budgetError)throw new Error('Önce gider planını yenileyin.');
+ const snapshot={version:budgetPlan.version,items:budgetPlan.items.map(i=>({...i}))},item=index===null?null:snapshot.items[index];
+ if(index!==null&&!item)throw new Error('Plan kalemi bulunamadı.');
+ if(index===null&&snapshot.items.length>=50)throw new Error('En fazla 50 gider planlanabilir.');
+ openDialog(item?'Planlanan gideri düzenle':'Düzenli gider planla',input('label','Gider adı','text',item?.label||'','required maxlength="100" placeholder="Örn. Temizlik"')+input('amount','Aylık tahmini tutar (TL)','number',item?item.amount/100:'','required min="0.01" max="10000000" step="0.01"'),async f=>{
+  const next=budgetItem(f.get('label'),f.get('amount')),items=snapshot.items.map(i=>({...i}));if(index===null)items.push(next);else items[index]=next;
+  budgetPlan=await api('budget','PUT',{expectedVersion:snapshot.version,items});toast('Gider planı kaydedildi.');
+ });
+}
+function deleteBudgetItem(index){
+ if(!state.admin||!budgetPlan||budgetError)throw new Error('Önce gider planını yenileyin.');
+ const snapshot={version:budgetPlan.version,items:budgetPlan.items.map(i=>({...i}))},item=snapshot.items[index];if(!item)throw new Error('Plan kalemi bulunamadı.');
+ openDialog('Planlanan gideri kaldır','<p><strong>'+esc(item.label)+'</strong> · '+money(item.amount)+'</p><p>Bu kalem aylık gider planından kaldırılacak.</p>',async()=>{budgetPlan=await api('budget','PUT',{expectedVersion:snapshot.version,items:snapshot.items.filter((_,i)=>i!==index)});toast('Kalem plandan kaldırıldı.');},'Plandan kaldır');
 }
 function reportHTML(){
  reportContext={kind:'month'};
@@ -536,13 +571,16 @@ document.addEventListener('submit',async e=>{
  try{const f=new FormData(e.target);await api('settings','PUT',{name:f.get('name'),monthlyDues:Number(f.get('monthlyDues')),openingBalance:Number(f.get('openingBalance'))});await refresh();toast('Ayarlar kaydedildi.');}catch(err){error(err);}finally{button.disabled=false;}
 });
 document.addEventListener('click',async e=>{
- const nav=e.target.closest('[data-tab]');if(nav){userNavigated=true;if(nav.dataset.tab==='annual-dues'&&tab==='dues')annualYear=Number(selectedMonth.slice(0,4));tab=nav.dataset.tab;if(!state){$('#view').innerHTML='<p class="empty">Kayıtlar yükleniyor…</p>';return;}if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
+ const nav=e.target.closest('[data-tab]');if(nav){userNavigated=true;if(nav.dataset.tab==='annual-dues'&&tab==='dues')annualYear=Number(selectedMonth.slice(0,4));tab=nav.dataset.tab;if(!state){$('#view').innerHTML='<p class="empty">Kayıtlar yükleniyor…</p>';return;}if(tab==='budget'){if(!state.admin){tab='overview';render();return;}budgetPlan=null;budgetLoading=true;render();await loadBudget();render();}else if(tab==='my-unit'){try{await refresh();}catch(err){error(err);}}else if(tab==='history'){if(!state.admin)return;$('#view').innerHTML='<p class="empty">İşlem geçmişi yükleniyor…</p>';try{await refresh();}catch(err){error(err);}}else render();return;}
  const btn=e.target.closest('[data-action]');if(!btn)return;
  e.preventDefault();
  const action=btn.dataset.action,id=Number(btn.dataset.id);
  if(uploadingDocument)return;
  try{
- if(action==='previous-month'||action==='next-month'){
+ if(action==='budget-retry'){budgetLoading=true;render();await loadBudget();render();}
+ else if(action==='budget-add'||action==='budget-edit'){editBudgetItem(action==='budget-edit'?id:null);}
+ else if(action==='budget-delete'){deleteBudgetItem(id);}
+ else if(action==='previous-month'||action==='next-month'){
   const d=new Date(selectedMonth+'-15T12:00:00');d.setMonth(d.getMonth()+(action==='next-month'?1:-1));
   const next=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
   if(next>='2000-01'&&next<='2099-12'){selectedMonth=next;selectedCharges.clear();render();}

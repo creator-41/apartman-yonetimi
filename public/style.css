@@ -59,3 +59,5 @@ dialog{max-width:calc(100vw - 24px)}
 @media(max-width:600px){.year-picker{width:100%;justify-content:center}.year-picker label{flex:1;justify-content:center}.annual-table{min-width:1260px}.annual-table th:first-child{min-width:116px}.annual-scroll{max-height:65vh}}
 
 .annual-filters{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}.annual-filters>div{flex:1;min-width:180px;max-width:360px}.annual-filters .check{min-height:44px;margin:0}.annual-filters button{min-height:44px}@media(max-width:600px){.annual-filters>div{max-width:none;width:100%}.annual-filters .check{width:100%}}
+
+.budget-result{font-weight:700;font-size:1.15rem;padding:14px;background:#edf6f1;border-radius:12px}.budget-shortfall{background:#fff1eb;color:#983f23}

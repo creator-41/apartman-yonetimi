@@ -1,3 +1,4 @@
+import {budgetSummary,budgetItem} from '../public/budget.js';
 import {expenseUpdate} from '../public/expense-files.js';
 import {annualDues,filterAnnualDues,annualStatus,MONTHS} from '../public/annual-dues.js';
 import {createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus} from '../public/notice-tracking.js';
@@ -20,7 +21,7 @@ async function fixture(apiImpl){
   if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,handlers:{},addEventListener(type,fn){this.handlers[type]=fn;},showModal(){this.open=true;},close(){this.open=false;}});
   return elements.get(selector);
  };
- const context=vm.createContext({expenseUpdate,FormData:class {constructor(target){this.values=target.formValues;}get(key){return this.values[key]??null;}},Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,filterAnnualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
+ const context=vm.createContext({budgetSummary,budgetItem,expenseUpdate,FormData:class {constructor(target){this.values=target.formValues;}get(key){return this.values[key]??null;}},Intl,Date,Set,Number,String,Math,Error,JSON,console,annualDues,filterAnnualDues,annualStatus,MONTHS,downloadAnnualWorkbook:()=>{},createNoticeBook,NOTICE_TRACKING_KEY,ownNoticeStatus,createUnitPreference,MY_UNIT_KEY,unitStatement,decisionReadPayload,sessionStorageFor,SESSION_KEY,adminRequestFromHash,createPush:()=>({sync:async()=>false}),requestPayload,sendRequest,requestStatus,requestLink,requestFromHash,requestChange,location:{href:"https://example.test/apartman/",hash:""},history:{replaceState(){}},unitPaymentPlan,noticePayload,sendPaymentNotice,waitingNotices,noticeStatus,
   crypto:{randomUUID:()=> '11111111-1111-4111-8111-111111111111'},window:{},document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}},
   config:{},createApi:()=>async(...args)=>{requests.push(args);if(apiImpl)return apiImpl(...args);return {ok:true,allocations:[],id:'test-notice',status:'pending'};},initPwa:()=>()=>{},setTimeout:()=>0,clearTimeout(){},setInterval(){}});
  let source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
@@ -229,4 +230,29 @@ test('Actual expense submit remains open without refreshing when server returns 
  f.run("state.categories=['Elektrik'];editExpense();refresh=async()=>{throw new Error('Should not refresh');};");
  await f.element('#dialogForm').handlers.submit({preventDefault(){},target:{formValues:{category:'Elektrik',description:'Test',amount:'10',date:'2026-10-01'}}});
  assert.equal(f.element('#modal').open,true);assert.equal(f.element('#dialogSubmit').disabled,false);assert.equal(f.requests.length,1);assert.equal(f.requests[0][0],'expenses/save');
+});
+
+test('Budget UI shows shortage, empty and no-payer states without exposing admin plan to residents',async()=>{
+ const f=await fixture();f.run("state.settings={monthlyDues:35000};state.units=[{id:1},{id:2,exempt:true}];budgetPlan={version:0,items:[]};");
+ assert.match(f.run('budgetHTML()'),/Hesaplamak için/);assert.doesNotMatch(f.run('budgetHTML()'),/fazla kalıyor/);
+ f.run("budgetPlan.items=[{label:'<Temizlik>',amount:300000}]");const html=f.run('budgetHTML()');assert.match(html,/açık var/);assert.match(html,/&lt;Temizlik&gt;/);assert.match(html,/1 ödeme yapacak bölüm/);
+ f.run('state.units[0].exempt=true');assert.match(f.run('budgetHTML()'),/Aidat ödeyecek bölüm yok/);
+ f.run('budgetError="Bağlantı yok"');assert.match(f.run('budgetHTML()'),/Plan alınamadı/);assert.doesNotMatch(f.run('budgetHTML()'),/Beklenen aylık aidat/);
+ f.run('state.admin=false');assert.equal(f.run('budgetHTML()'),'');assert.throws(()=>f.run('editBudgetItem()'),/yenileyin/);
+});
+test('Budget item editing saves integer cents with captured version and never changes aidat or ledger',async()=>{
+ const f=await fixture((path,method,data)=>{if(path==='budget')return {version:3,items:data.items};throw new Error('Unexpected financial write');});
+ f.run("budgetPlan={version:2,items:[{label:'Eski',amount:10000}]};editBudgetItem(0);");
+ f.context.form={get:k=>({label:'Temizlik',amount:'3000.01'}[k])};await f.run('dialogAction(form)');
+ assert.equal(f.requests.length,1);assert.equal(f.requests[0][0],'budget');assert.equal(f.requests[0][1],'PUT');assert.equal(f.requests[0][2].expectedVersion,2);assert.equal(f.requests[0][2].items[0].amount,300001);assert.equal(f.run('budgetPlan.version'),3);
+});
+test('Budget stale-write rejection keeps original plan and draft; removal needs its dialog submit',async()=>{
+ const f=await fixture(()=>{throw new Error('Plan başka bir ekranda değişti');});f.run("budgetPlan={version:2,items:[{label:'Temizlik',amount:300000}]};deleteBudgetItem(0);");assert.equal(f.requests.length,0);assert.equal(f.element('#dialogSubmit').textContent,'Plandan kaldır');
+ await assert.rejects(f.run('dialogAction()'),/başka bir ekranda/);assert.equal(f.run('budgetPlan.items.length'),1);assert.equal(f.requests[0][2].items.length,0);assert.equal(f.element('#modal').open,true);
+});
+
+test('Budget load failures clear cached totals and later responses cannot restore a logged-out plan',async()=>{
+ let reject;const f=await fixture(()=>new Promise((resolve,fail)=>{reject=fail;}));
+ f.run("budgetPlan={version:2,items:[{label:'Test',amount:1}]};");const pending=f.run('loadBudget()');reject(new Error('Network down'));await pending;assert.equal(f.run('budgetPlan'),null);assert.match(f.run('budgetHTML()'),/Plan alınamadı/);
+ let resolve;const second=await fixture(()=>new Promise(done=>{resolve=done;}));const pending2=second.run('loadBudget()');second.run("state.admin=false;budgetLoad++;budgetPlan=null;");resolve({version:1,items:[{label:'Private',amount:100}]});await pending2;assert.equal(second.run('budgetPlan'),null);
 });
