@@ -1,4 +1,4 @@
-import {annualDues,annualStatus,MONTHS} from './annual-dues.js?v=annual-1';
+import {annualDues,filterAnnualDues,annualStatus,MONTHS} from './annual-dues.js?v=grid-1';
 const xml=value=>String(value??'').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 const declaration='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 const main='http://schemas.openxmlformats.org/spreadsheetml/2006/main',rel='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -24,12 +24,13 @@ function sheet({rows,widths,filterEnd}){
  const last=col(widths.length-1),cells=rows.map((row,i)=>`<row r="${i+1}" ht="${i===0?28:i===1?34:i===2?34:42}" customHeight="1">`+row.map((cell,j)=>typeof cell.value==='number'?`<c r="${col(j)}${i+1}" s="${cell.style}"><v>${cell.value}</v></c>`:`<c r="${col(j)}${i+1}" s="${cell.style}" t="inlineStr"><is><t xml:space="preserve">${xml(cell.value)}</t></is></c>`).join('')+'</row>').join('');
  return declaration+`<worksheet xmlns="${main}"><dimension ref="A1:${last}${rows.length}"/><sheetViews><sheetView workbookViewId="0"><pane xSplit="1" ySplit="3" topLeftCell="B4" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><cols>`+widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')+`</cols><sheetData>${cells}</sheetData><autoFilter ref="A3:${last}${filterEnd}"/><mergeCells count="2"><mergeCell ref="A1:${last}1"/><mergeCell ref="A2:${last}2"/></mergeCells><pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/></worksheet>`;
 }
-export function annualWorkbook(state,year,currentMonth){
- const report=annualDues(state,year,currentMonth),statusStyles={paid:3,partial:4,unpaid:5,exempt:6,missing:7,future:7};
- const title=state.settings.name+' · '+year+' aidat çizelgesi',note='Aidat ayına göre güncel durum. Muaf: güncel karar; geçmişte kayıt olmayan aylar muaf sayılmaz.';
+export function annualWorkbook(state,year,currentMonth,filters={}){
+ const report=filterAnnualDues(annualDues(state,year,currentMonth),filters),statusStyles={paid:3,partial:4,unpaid:5,exempt:6,missing:7,future:7};
+ const filterNote=(filters.query?' Arama: '+filters.query+'.':'')+(filters.debtOnly?' Yalnızca borcu olan daireler.':'');
+ const title=state.settings.name+' · '+year+' aidat çizelgesi',note='Aidat ayına göre güncel durum. Muaf: güncel karar; geçmişte kayıt olmayan aylar muaf sayılmaz.'+filterNote;
  const rows=[[text(title,1)],[text(note,12)],['Bölüm',...MONTHS,'Borçlandırma (TL)','Ödenen (TL)','Kalan (TL)'].map(v=>text(v,2)),...report.rows.map(r=>[text(r.label),...r.cells.map(c=>text(annualStatus(c.status)+(c.chargeId?'\n'+money(c.remaining>0?c.remaining:c.amount)+(c.remaining>0?' kalan':''):''),statusStyles[c.status])),number(r.amount),number(r.paid),number(r.remaining)]),[text('TOPLAM',10),...report.months.map(c=>number(c.remaining,9)),number(report.amount,9),number(report.paid,9),number(report.remaining,9)]];
  rows.push([text('TOPLAM satırında aylar için kalan borç gösterilir.',12)]);
- const detailRows=[[text(state.settings.name+' · '+year+' aidat ayrıntıları',1)],[text('Ödenen tutar, seçilen aidat ayına işlenmiş ödemelerdir; tahsilat yılı farklı olabilir.',12)],['Bölüm','Aidat ayı','Durum','Tür','Borçlandırma (TL)','Ödenen (TL)','Kalan (TL)'].map(v=>text(v,2))];
+ const detailRows=[[text(state.settings.name+' · '+year+' aidat ayrıntıları',1)],[text('Ödenen tutar, seçilen aidat ayına işlenmiş ödemelerdir; tahsilat yılı farklı olabilir.'+filterNote,12)],['Bölüm','Aidat ayı','Durum','Tür','Borçlandırma (TL)','Ödenen (TL)','Kalan (TL)'].map(v=>text(v,2))];
  for(const r of report.rows)for(const c of r.cells)if(c.chargeId)detailRows.push([text(r.label),text(c.period),text(annualStatus(c.status),statusStyles[c.status]),text(c.kind==='opening'?'Devir borcu':'Aidat'),number(c.amount),number(c.paid),number(c.remaining)]);
  const filterEnd=detailRows.length;detailRows.push([text('TOPLAM',10),text('',10),text('',10),text('',10),number(report.amount,9),number(report.paid,9),number(report.remaining,9)]);
  const files={
@@ -43,6 +44,6 @@ export function annualWorkbook(state,year,currentMonth){
  };
  return zip(files);
 }
-export function downloadAnnualWorkbook(state,year,currentMonth){
- const bytes=annualWorkbook(state,year,currentMonth),url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),a=document.createElement('a');a.href=url;a.download='aidat-cizelgesi-'+year+'.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+export function downloadAnnualWorkbook(state,year,currentMonth,filters={}){
+ const bytes=annualWorkbook(state,year,currentMonth,filters),url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),a=document.createElement('a');a.href=url;a.download='aidat-cizelgesi-'+year+'.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }

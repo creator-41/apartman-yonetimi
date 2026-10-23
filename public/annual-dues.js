@@ -16,3 +16,9 @@ export function annualDues(state,year,currentMonth){
  const months=periods.map((period,i)=>({period,amount:rows.reduce((s,r)=>s+r.cells[i].amount,0),paid:rows.reduce((s,r)=>s+r.cells[i].paid,0),remaining:rows.reduce((s,r)=>s+r.cells[i].remaining,0)}));
  return {year,rows,months,amount:rows.reduce((s,r)=>s+r.amount,0),paid:rows.reduce((s,r)=>s+r.paid,0),remaining:rows.reduce((s,r)=>s+r.remaining,0)};
 }
+
+export function filterAnnualDues(report,{query='',debtOnly=false}={}){
+ const normalize=s=>String(s).toLocaleLowerCase('tr-TR').normalize('NFD').replace(/\p{M}/gu,'').replace(/ı/g,'i').trim(),needle=normalize(query);
+ const rows=report.rows.filter(r=>(!needle||normalize(r.label).includes(needle))&&(!debtOnly||r.remaining>0));
+ return {...report,rows,months:report.months.map((m,i)=>({...m,amount:rows.reduce((s,r)=>s+r.cells[i].amount,0),paid:rows.reduce((s,r)=>s+r.cells[i].paid,0),remaining:rows.reduce((s,r)=>s+r.cells[i].remaining,0)})),amount:rows.reduce((s,r)=>s+r.amount,0),paid:rows.reduce((s,r)=>s+r.paid,0),remaining:rows.reduce((s,r)=>s+r.remaining,0)};
+}

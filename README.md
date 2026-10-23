@@ -257,3 +257,11 @@ Aidatlar → **Yıllık çizelge** tüm daire/dükkânların ocak–aralık duru
 **Excel’e indir** güncel veriden gerçek `.xlsx` üretir: renkli Aidat çizelgesi ve sayısal TL sütunlarıyla Aidat ayrıntıları. İlk üç satır ve bölüm sütunu sabitlenir; filtreler vardır. Çizelgenin TOPLAM satırında ay sütunları kalan borcu gösterir. Daire etiketleri formül olarak çalıştırılmaz; malik/oturan veya yöneticiye özel notlar dosyaya eklenmez. Üretim tarayıcı içinde, dış bağımlılık/CDN olmadan yapılır. `annual-xlsx.js` SpreadsheetML ve ZIP STORE paketini oluşturur; yeni veritabanı işlemi yoktur.
 
 Doğrulama: sözdizimi kontrolleri ve 107 Node testi başarılı. Yeni kontroller yıl ayrımı, kuruş toplamları, kısmi ödeme, devir, geçmiş borç/muafiyet, kayıtsız/gelecek aylar, doğru aya/daireye ait makbuz, özel notların dışlanması ve güvenli metin hücrelerini kapsar. Üretilen örnek dosya bağımsız ZIP CRC kontrolü ve openpyxl ile açılarak iki sayfa, sabit başlık/filtreler, TL tutarları ve formül benzeri etiketin metin olarak kalması doğrulandı. Masaüstü Excel'de elle açma bu turda yapılmadı.
+
+### Yıllık çizelgede hızlı arama ve gezinme düzeltmeleri
+
+Çizelgede Türkçe daire/dükkân araması ve Yalnızca borcu olanlar filtresi birlikte çalışır. Görünen bölüm sayısı belirtilir; üst toplamlar, ay toplamları ve Excel'in iki sayfası aynı filtreye göre hesaplanır. Excel'de filtre bilgisi açıklanır. Filtreleri temizlemek tüm bölümleri geri getirir. Arama yazılırken otomatik yenileme bekler; metin imleci korunur.
+
+Aynı yıldaki veri yenilemesinde geniş tablonun yatay ve dikey kaydırması korunur; yıl değişince tablo baştan açılır. Başlangıç verileri yüklenirken kullanıcının seçtiği sekme, hatırlanan Dairem tercihiyle artık ezilmez ve yükleme sırasında boş state ile render çağrılmaz. Kullanıcı sekme seçmemişse önceki Dairem başlangıç davranışı korunur.
+
+Doğrulama: sözdizimi ve diff kontrolleri ile 110 Node testi geçti. Türkçe arama/borç filtresi, tüm toplamların ve Excel satırlarının aynı kapsamı taşıması, gecikmiş başlangıç yanıtında seçilen sekmenin korunması ve tablo yeniden oluşturulduğunda iki kaydırma ekseninin taşınması kontrol edildi. Veritabanı değişikliği yok.
